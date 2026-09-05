@@ -1,0 +1,19 @@
+{
+  "name": "breeze-kart",
+  "version": "1.0.0",
+  "private": true,
+  "description": "风驰卡丁车 — offline, original 3D browser kart racing",
+  "scripts": {
+    "dev": "node scripts/serve.cjs",
+    "start": "node scripts/serve.cjs",
+    "vendor": "node scripts/vendor.cjs",
+    "check": "node --check js/tracks.js && node --check js/core.js && node --check js/world.js && node --check js/audio.js && node --check js/game.js",
+    "test": "node --test tests/core.test.cjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "esbuild": "^0.25.0",
+    "three": "0.180.0"
+  }
+}
