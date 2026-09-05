@@ -57,6 +57,8 @@
       if (type === 'item-magnet') { this.tone(220, 0.3, 0, 'square'); this.tone(440, 0.2, 0.15); }
       if (type === 'item-shield' || type === 'itemBlock') { this.tone(980, 0.12); this.tone(1470, 0.2, 0.08); }
       if (type === 'item-nitro') { this.tone(780, 0.13); this.tone(1170, 0.25, 0.1); }
+      if (type === 'item-lightning') { this.tone(1400, 0.07, 0, 'square'); this.tone(180, 0.35, 0.05, 'sawtooth'); }
+      if (type === 'item-ufo') { this.tone(320, 0.35); this.tone(480, 0.3, 0.18); }
       if (type === 'itemHit') { this.tone(180, 0.25, 0, 'triangle'); this.tone(90, 0.3, 0.08, 'triangle'); }
       if (type === 'finish') [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.36, i * 0.12));
     }

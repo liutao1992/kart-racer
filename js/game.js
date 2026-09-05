@@ -26,10 +26,10 @@
   const driftFeedback = $('drift-feedback'), nitroPanel = $('nitro-panel');
   let guideReturnFocus = null;
   const keys = new Set(), gameKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyR', 'Escape', 'ControlLeft', 'ControlRight']);
-  const ITEM_LABELS = { missile: '导弹', banana: '香蕉皮', water: '水炸弹', magnet: '磁铁', shield: '护盾', nitro: '加速器' };
-  const ITEM_ICONS = { missile: '🚀', banana: '🍌', water: '💧', magnet: '🧲', shield: '🛡️', nitro: '⚡' };
-  const ITEM_USE_TOAST = { missile: '导弹发射，锁定前方对手！', banana: '香蕉皮已丢在身后', water: '水炸弹抛出去了！', magnet: '磁铁吸附，全速追上去！', shield: '护盾开启，抵挡一次攻击', nitro: '✦ 道具氮气 +1' };
-  const ITEM_HIT_TOAST = { missile: '被导弹击中，晕头转向！', water: '被水泡困住，慢慢划！', banana: '踩到香蕉皮，打滑了！' };
+  const ITEM_LABELS = { missile: '导弹', banana: '香蕉皮', water: '水炸弹', magnet: '磁铁', shield: '护盾', nitro: '加速器', lightning: '闪电', ufo: 'UFO 飞碟' };
+  const ITEM_ICONS = { missile: '🚀', banana: '🍌', water: '💧', magnet: '🧲', shield: '🛡️', nitro: '⚡', lightning: '🌩️', ufo: '🛸' };
+  const ITEM_USE_TOAST = { missile: '导弹发射，锁定前方对手！', banana: '香蕉皮已丢在身后', water: '水炸弹抛出去了！', magnet: '磁铁吸附，全速追上去！', shield: '护盾开启，抵挡一次攻击', nitro: '✦ 道具氮气 +1', lightning: '闪电出击，对手集体麻痹！', ufo: 'UFO 出动，拖住第一名！' };
+  const ITEM_HIT_TOAST = { missile: '被导弹击中，晕头转向！', water: '被水泡困住，慢慢划！', banana: '踩到香蕉皮，打滑了！', lightning: '被闪电劈中，全身麻痹！', ufo: '被 UFO 吸住，速度被拖慢！' };
   const mapCtx = dom.minimap.getContext('2d');
   function mapTransform(track, width, height, padding) {
     const b = track.bounds, scale = Math.min((width - 2 * padding) / (b.maxX - b.minX), (height - 2 * padding) / (b.maxZ - b.minZ));
@@ -143,7 +143,7 @@
     dom.lap.textContent = Math.min(3, p.lap); dom['race-time'].textContent = C.formatTime(race.elapsed);
     dom['lap-time'].textContent = '本圈 ' + C.formatTime(race.elapsed - p.lapStart);
     dom.speed.textContent = Math.round(Math.abs(p.speed) * 3.6); dom['speed-bar'].style.width = `${Math.min(100, Math.abs(p.speed) / 61 * 100)}%`;
-    dom['drive-status'].textContent = race.state === 'countdown' ? '准备出发' : p.stun > 0 ? '被打晕了，稳住！' : p.bubble > 0 ? '水泡围困中…' : p.slip > 0 ? '打滑中！' : p.boost > 0 ? '氮气加速中 ↗' : p.drift ? '漂亮漂移 ✦' : Math.abs(p.lateral) > race.track.width / 2 ? '驶回路面，恢复速度' : p.speed < -0.5 ? '倒车中' : '享受这一路的风';
+    dom['drive-status'].textContent = race.state === 'countdown' ? '准备出发' : p.stun > 0 ? '被打晕了，稳住！' : p.bubble > 0 ? '水泡围困中…' : p.slip > 0 ? '打滑中！' : p.zap > 0 ? '触电麻痹中…' : p.ufo > 0 ? '被 UFO 拖住了！' : p.boost > 0 ? '氮气加速中 ↗' : p.drift ? '漂亮漂移 ✦' : Math.abs(p.lateral) > race.track.width / 2 ? '驶回路面，恢复速度' : p.speed < -0.5 ? '倒车中' : '享受这一路的风';
     dom['nitro-1'].classList.toggle('filled', p.nitro >= 1); dom['nitro-2'].classList.toggle('filled', p.nitro >= 2);
     [dom['item-1'], dom['item-2']].forEach((slot, i) => {
       const item = p.items[i], icon = slot.querySelector('span'), text = item ? ITEM_ICONS[item] : '';

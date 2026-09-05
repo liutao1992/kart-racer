@@ -274,3 +274,44 @@ test('pausing freezes boxes, hazards, and missiles along with the cars', () => {
   race.pause(); race.step(1); race.step(1);
   assert.equal(JSON.stringify([race.boxes, race.hazards, race.missiles]), snapshot);
 });
+test('lightning zaps every unfinished opponent and a shield blocks it', () => {
+  const race = itemRace(), car = race.player;
+  race.cars.slice(1).forEach(c => { c.speed = 30; });
+  race.cars[5].shield = 6; race.cars[4].finishTime = 1;
+  car.items = ['lightning'];
+  assert.equal(race.useItem(), true);
+  assert.ok(race.cars[1].zap > 0 && race.cars[1].speed <= 15.1);
+  assert.equal(race.cars[5].zap, 0); assert.equal(race.cars[5].shield, 0);
+  assert.equal(race.cars[4].zap, 0);
+  assert.ok(race.drainEvents().some(e => e.type === 'itemBlock' && e.id === 5));
+  // Zap caps top speed at 24 even under full throttle.
+  race.cars[1].speed = 30;
+  for (let i = 0; i < 60; i++) race.drive(race.cars[1], { throttle: 1 }, dt);
+  assert.ok(race.cars[1].speed < 27);
+  // No valid targets left -> refund.
+  race.cars.forEach(c => { if (c !== car) c.finishTime = 1; });
+  car.items = ['lightning'];
+  assert.equal(race.useItem(), false); assert.deepEqual(car.items, ['lightning']);
+});
+test('a UFO latches onto the leader and drags their top speed down', () => {
+  const race = itemRace(), car = race.player, leader = race.cars[2];
+  race.cars.slice(1).forEach(c => { c.progress = 10; });
+  leader.progress = 400; leader.speed = 40; car.progress = 0;
+  car.items = ['ufo'];
+  assert.equal(race.useItem(), true);
+  assert.ok(leader.ufo > 0); assert.ok(leader.speed < 40);
+  for (let i = 0; i < 90; i++) race.drive(leader, { throttle: 1 }, dt);
+  assert.ok(leader.speed < 33);
+  // The leader using one has no target -> refund.
+  leader.items = ['ufo']; leader.ufo = 0;
+  assert.equal(race.useItem(leader), false); assert.deepEqual(leader.items, ['ufo']);
+});
+test('lightning and UFO only show up for midfield and trailing drivers', () => {
+  const race = itemRace(9);
+  race.player.progress = -100; race.cars.slice(1).forEach((c, i) => { c.progress = i * 10; });
+  const last = { lightning: 0, ufo: 0 };
+  for (let i = 0; i < 600; i++) { const item = race.rollItem(race.player); if (item in last) last[item]++; }
+  assert.ok(last.lightning + last.ufo > 60);
+  race.player.progress = 1000;
+  for (let i = 0; i < 600; i++) assert.notEqual(race.rollItem(race.player), 'ufo');
+});

@@ -347,7 +347,11 @@
       shieldMesh.visible = false; shieldMesh.castShadow = false;
       const bubbleMesh = this.mesh(new T.SphereGeometry(1.9, 18, 14), new T.MeshBasicMaterial({ color: '#8ad4f5', transparent: true, opacity: 0.35, depthWrite: false }), 0, 1.1, 0, group);
       bubbleMesh.visible = false; bubbleMesh.castShadow = false;
-      return { group, body, driver, wheels, paint, flames, shieldMesh, bubbleMesh };
+      const ufoMesh = new T.Group(); ufoMesh.position.y = 3.4; ufoMesh.visible = false; group.add(ufoMesh);
+      const saucer = this.mesh(new T.SphereGeometry(0.95, 16, 10), '#a8b6c4', 0, 0, 0, ufoMesh); saucer.scale.set(1, 0.32, 1);
+      const dome = this.mesh(new T.SphereGeometry(0.42, 12, 8), new T.MeshBasicMaterial({ color: '#bfe8ff', transparent: true, opacity: 0.6 }), 0, 0.3, 0, ufoMesh);
+      dome.castShadow = false;
+      return { group, body, driver, wheels, paint, flames, shieldMesh, bubbleMesh, ufoMesh };
     }
     setColor(color) { this.carModels[0].paint.color.set(color); }
     createParticlePool(count, spark) {
@@ -612,6 +616,8 @@
         model.bubbleMesh.visible = car.bubble > 0;
         // The spin is visual only; physics heading stays put so wrong-way and gates are not disturbed.
         model.body.rotation.y = car.stun > 0 && !this.reducedMotion ? (this.clock * 11) % (Math.PI * 2) : 0;
+        model.ufoMesh.visible = car.ufo > 0;
+        if (car.ufo > 0 && !this.reducedMotion) { model.ufoMesh.rotation.y += dt * 6; model.ufoMesh.position.y = 3.4 + Math.sin(this.clock * 5) * 0.15; }
       }
       this.updateItems(race, dt);
       const p = race.player;

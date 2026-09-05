@@ -64,12 +64,12 @@
   }
   const COLORS = ['#f17b46', '#3fafa7', '#f1be4b', '#8596d3', '#e486a4', '#90b56b'];
   const NAMES = ['你', '小风', '橘子', '阿森', '泡泡', '闪电'];
-  const ITEMS = ['missile', 'banana', 'water', 'magnet', 'shield', 'nitro'];
+  const ITEMS = ['missile', 'banana', 'water', 'magnet', 'shield', 'nitro', 'lightning', 'ufo'];
   // Rank-weighted item odds: trailing drivers get more attack items, KartRider style.
   const ITEM_TABLE = [
-    { maxRank: 1, weights: { missile: 5, water: 15, magnet: 10, nitro: 10, banana: 30, shield: 30 } },
-    { maxRank: 3, weights: { missile: 20, water: 20, magnet: 20, nitro: 10, banana: 15, shield: 15 } },
-    { maxRank: 5, weights: { missile: 30, water: 20, magnet: 25, nitro: 15, banana: 5, shield: 5 } }];
+    { maxRank: 1, weights: { missile: 5, water: 15, magnet: 10, nitro: 10, banana: 28, shield: 27, lightning: 5, ufo: 0 } },
+    { maxRank: 3, weights: { missile: 20, water: 18, magnet: 18, nitro: 8, banana: 12, shield: 12, lightning: 7, ufo: 5 } },
+    { maxRank: 5, weights: { missile: 25, water: 18, magnet: 20, nitro: 10, banana: 4, shield: 4, lightning: 10, ufo: 9 } }];
   // Rows of three boxes every 150 units, starting past the grid area.
   function buildBoxes(track) {
     const boxes = [];
@@ -93,7 +93,7 @@
           lastS: mod(progress, track.length), lateral: id % 2 ? 2.1 : -2.1, lap: 1,
           finishTime: null, finishPlace: null, lapTimes: [], lapStart: 0, bump: 0,
           resetCooldown: 0, wrongWay: 0, missedGate: false, lastSafeProgress: progress,
-          items: [], shield: 0, stun: 0, slip: 0, slipDir: 1, bubble: 0, magnet: 0, magnetTarget: -1, aiItemCooldown: 0,
+          items: [], shield: 0, stun: 0, slip: 0, slipDir: 1, bubble: 0, magnet: 0, magnetTarget: -1, zap: 0, ufo: 0, aiItemCooldown: 0,
           aiLane: (id % 3 - 1) * 2.2, aiPace: 0.83 + id * 0.021 };
       });
     }
@@ -131,6 +131,14 @@
         const target = this.cars.filter(c => c !== car && c.finishTime === null && c.progress > car.progress && c.progress - car.progress < 130).sort((a, b) => a.progress - b.progress)[0];
         if (!target) return refund();
         car.magnet = 2.4; car.magnetTarget = target.id;
+      } else if (item === 'lightning') {
+        const targets = this.cars.filter(c => c !== car && c.finishTime === null);
+        if (!targets.length) return refund();
+        for (const target of targets) this.applyHit(target, 'lightning', car.id);
+      } else if (item === 'ufo') {
+        const target = this.standings().find(c => c.finishTime === null);
+        if (!target || target === car) return refund();
+        this.applyHit(target, 'ufo', car.id);
       } else if (item === 'missile') {
         const order = this.standings(), rank = order.indexOf(car), target = rank > 0 ? order[rank - 1] : null;
         this.missiles.push({ from: car.id, target: target ? target.id : -1, progress: car.progress, lateral: car.lateral, life: 4 });
@@ -149,6 +157,8 @@
       if (kind === 'missile') { car.stun = 1.1; car.speed *= 0.35; }
       else if (kind === 'banana') { car.slip = 0.9; car.slipDir = car.steer >= 0 ? 1 : -1; car.speed *= 0.55; }
       else if (kind === 'water') car.bubble = 2;
+      else if (kind === 'lightning') { car.zap = 1.6; car.speed *= 0.5; }
+      else if (kind === 'ufo') { car.ufo = 3; car.speed *= 0.85; }
       this.events.push({ type: 'itemHit', id: car.id, item: kind, from: fromId });
       return true;
     }
@@ -164,6 +174,8 @@
       else if (item === 'magnet' && nearestAhead < 130) this.useItem(car);
       else if (item === 'shield' && (this.missiles.some(m => m.target === car.id) || this.rand() < 0.05)) this.useItem(car);
       else if (item === 'banana' && ((nearestBehind > -25 && nearestBehind < -2) || this.rand() < 0.08)) this.useItem(car);
+      else if (item === 'lightning') this.useItem(car);
+      else if (item === 'ufo') this.useItem(car);
       else if (item === 'nitro' && car.nitro < 2 && Math.abs(car.steer) < 0.15 && car.speed > 25) this.useItem(car);
     }
     updateItems(dt) {
@@ -217,7 +229,7 @@
       const p = sample(this.track, progress);
       Object.assign(car, { x: p.x, z: p.z, heading: p.heading, velocityHeading: p.heading, speed: 0, drift: false,
         progress, lastS: p.s, lateral: 0, boost: 0, resetCooldown: 2.2, wrongWay: 0, missedGate: false,
-        stun: 0, slip: 0, bubble: 0, magnet: 0, magnetTarget: -1 });
+        stun: 0, slip: 0, bubble: 0, magnet: 0, magnetTarget: -1, zap: 0, ufo: 0 });
       this.events.push({ type: 'reset', id: car.id });
       return true;
     }
@@ -261,6 +273,7 @@
       car.stun = Math.max(0, car.stun - dt); car.slip = Math.max(0, car.slip - dt);
       car.bubble = Math.max(0, car.bubble - dt); car.magnet = Math.max(0, car.magnet - dt);
       car.shield = Math.max(0, car.shield - dt); car.aiItemCooldown = Math.max(0, car.aiItemCooldown - dt);
+      car.zap = Math.max(0, car.zap - dt); car.ufo = Math.max(0, car.ufo - dt);
       const oldDrift = car.drift;
       const desiredSteer = car.stun > 0 ? 0 : clamp(Number(input.steer) || 0, -1, 1);
       // Player steering ramps up faster than AI: digital keys need a snappier lock.
@@ -275,6 +288,9 @@
       car.speed -= car.speed * (car.drift ? 0.16 : 0.06) * dt;
       if (car.stun > 0) car.speed = approach(car.speed, 6, dt, 3);
       if (car.speed > top) car.speed = approach(car.speed, top, dt, offroad ? 4 : 2.8);
+      // Lightning and UFO are hard ceilings: being zapped or dragged must feel firm.
+      if (car.zap > 0) car.speed = Math.min(car.speed, 24);
+      if (car.ufo > 0) car.speed = Math.min(car.speed, 30);
       car.speed = clamp(car.speed, -9, 64);
       if (Math.abs(car.speed) < 0.02) car.speed = 0;
       const speedFactor = clamp(Math.abs(car.speed) / 12, 0, 1);
