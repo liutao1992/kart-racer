@@ -50,6 +50,14 @@
       if (type === 'charged') { this.tone(780, 0.13); this.tone(1170, 0.25, 0.1); }
       if (type === 'lap') { this.tone(660, 0.16); this.tone(880, 0.2, 0.12); }
       if (type === 'bump') this.tone(75, 0.1, 0, 'triangle');
+      if (type === 'itemPickup') { this.tone(880, 0.09); this.tone(1320, 0.14, 0.07); }
+      if (type === 'item-missile' || type === 'missileLaunch') { this.tone(300, 0.2, 0, 'sawtooth'); this.tone(600, 0.25, 0.1, 'sawtooth'); }
+      if (type === 'item-banana') { this.tone(500, 0.1); this.tone(350, 0.12, 0.08); }
+      if (type === 'item-water') { this.tone(700, 0.15); this.tone(450, 0.3, 0.1); }
+      if (type === 'item-magnet') { this.tone(220, 0.3, 0, 'square'); this.tone(440, 0.2, 0.15); }
+      if (type === 'item-shield' || type === 'itemBlock') { this.tone(980, 0.12); this.tone(1470, 0.2, 0.08); }
+      if (type === 'item-nitro') { this.tone(780, 0.13); this.tone(1170, 0.25, 0.1); }
+      if (type === 'itemHit') { this.tone(180, 0.25, 0, 'triangle'); this.tone(90, 0.3, 0.08, 'triangle'); }
       if (type === 'finish') [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.36, i * 0.12));
     }
   }

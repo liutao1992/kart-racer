@@ -234,3 +234,16 @@ test('complete a race through keyboard inputs, drift, use nitro, save result, ra
   expect((await snapshot(page)).player.lapTimes).toEqual([]); expect((await snapshot(page)).player.nitro).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('item system: HUD slots, empty-inventory hint and live boxes in snapshot', async ({ page }) => {
+  await loaded(page); await page.clock.install();
+  await page.locator('#start-button').click();
+  for (let i = 0; i < 38; i++) await page.clock.fastForward(100);
+  expect((await snapshot(page)).state).toBe('racing');
+  await expect(page.locator('.item-slot')).toHaveCount(2);
+  const snap = await snapshot(page);
+  expect(Array.isArray(snap.player.items)).toBe(true);
+  expect(snap.boxes).toBeGreaterThan(0);
+  await page.keyboard.press('ControlLeft');
+  await expect(page.locator('#toast')).toContainText('道具栏');
+});

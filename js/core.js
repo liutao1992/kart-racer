@@ -64,11 +64,26 @@
   }
   const COLORS = ['#f17b46', '#3fafa7', '#f1be4b', '#8596d3', '#e486a4', '#90b56b'];
   const NAMES = ['你', '小风', '橘子', '阿森', '泡泡', '闪电'];
+  const ITEMS = ['missile', 'banana', 'water', 'magnet', 'shield', 'nitro'];
+  // Rank-weighted item odds: trailing drivers get more attack items, KartRider style.
+  const ITEM_TABLE = [
+    { maxRank: 1, weights: { missile: 5, water: 15, magnet: 10, nitro: 10, banana: 30, shield: 30 } },
+    { maxRank: 3, weights: { missile: 20, water: 20, magnet: 20, nitro: 10, banana: 15, shield: 15 } },
+    { maxRank: 5, weights: { missile: 30, water: 20, magnet: 25, nitro: 15, banana: 5, shield: 5 } }];
+  // Rows of three boxes every 150 units, starting past the grid area.
+  function buildBoxes(track) {
+    const boxes = [];
+    for (let s = 60; s < track.length - 20; s += 150) for (const lateral of [-2.4, 0, 2.4]) {
+      const p = sample(track, s, lateral); boxes.push({ x: p.x, z: p.z, respawn: 0 });
+    }
+    return boxes;
+  }
   class Race {
-    constructor(track, color = COLORS[0]) {
+    constructor(track, color = COLORS[0], rng = Math.random) {
       this.track = track;
       this.state = 'ready'; this.elapsed = 0; this.countdown = 3.4; this.laps = 3;
-      this.events = []; this.finishedCount = 0;
+      this.events = []; this.finishedCount = 0; this.rand = rng;
+      this.boxes = buildBoxes(track); this.hazards = []; this.missiles = [];
       this.cars = Array.from({ length: 6 }, (_, id) => {
         const progress = -8 - Math.floor(id / 2) * 7;
         const pos = sample(track, progress, id % 2 ? 2.1 : -2.1);
@@ -78,6 +93,7 @@
           lastS: mod(progress, track.length), lateral: id % 2 ? 2.1 : -2.1, lap: 1,
           finishTime: null, finishPlace: null, lapTimes: [], lapStart: 0, bump: 0,
           resetCooldown: 0, wrongWay: 0, missedGate: false, lastSafeProgress: progress,
+          items: [], shield: 0, stun: 0, slip: 0, slipDir: 1, bubble: 0, magnet: 0, magnetTarget: -1, aiItemCooldown: 0,
           aiLane: (id % 3 - 1) * 2.2, aiPace: 0.83 + id * 0.021 };
       });
     }
@@ -91,6 +107,108 @@
       this.events.push({ type: 'boost', id: car.id });
       return true;
     }
+    rollItem(car) {
+      const rank = this.standings().indexOf(car);
+      const row = ITEM_TABLE.find(r => rank <= r.maxRank) || ITEM_TABLE[ITEM_TABLE.length - 1];
+      let roll = this.rand() * 100;
+      for (const item of ITEMS) { roll -= row.weights[item]; if (roll < 0) return item; }
+      return 'banana';
+    }
+    useItem(car = this.player) {
+      if (this.state !== 'racing' || car.finishTime !== null || !car.items.length) return false;
+      const item = car.items.shift(), refund = () => { car.items.unshift(item); return false; };
+      if (item === 'nitro') {
+        if (car.nitro >= 2) return refund();
+        car.nitro++;
+      } else if (item === 'shield') {
+        car.shield = 6;
+      } else if (item === 'banana') {
+        this.hazards.push({ kind: 'banana', x: car.x, z: car.z, arm: 0.5, life: 40, from: car.id });
+      } else if (item === 'water') {
+        const p = sample(this.track, car.progress + 45, car.lateral);
+        this.hazards.push({ kind: 'water', x: p.x, z: p.z, arm: 0.8, blast: 0, from: car.id });
+      } else if (item === 'magnet') {
+        const target = this.cars.filter(c => c !== car && c.finishTime === null && c.progress > car.progress && c.progress - car.progress < 130).sort((a, b) => a.progress - b.progress)[0];
+        if (!target) return refund();
+        car.magnet = 2.4; car.magnetTarget = target.id;
+      } else if (item === 'missile') {
+        const order = this.standings(), rank = order.indexOf(car), target = rank > 0 ? order[rank - 1] : null;
+        this.missiles.push({ from: car.id, target: target ? target.id : -1, progress: car.progress, lateral: car.lateral, life: 4 });
+        this.events.push({ type: 'missileLaunch', id: car.id, target: target ? target.id : -1 });
+      }
+      this.events.push({ type: 'itemUse', id: car.id, item });
+      return true;
+    }
+    // Single funnel for item damage: shields block everything except bananas (KartRider rule).
+    applyHit(car, kind, fromId = -1) {
+      if (car.finishTime !== null) return false;
+      if (kind !== 'banana' && car.shield > 0) {
+        car.shield = 0; this.events.push({ type: 'itemBlock', id: car.id, item: kind });
+        return false;
+      }
+      if (kind === 'missile') { car.stun = 1.1; car.speed *= 0.35; }
+      else if (kind === 'banana') { car.slip = 0.9; car.slipDir = car.steer >= 0 ? 1 : -1; car.speed *= 0.55; }
+      else if (kind === 'water') car.bubble = 2;
+      this.events.push({ type: 'itemHit', id: car.id, item: kind, from: fromId });
+      return true;
+    }
+    // Deliberately simple triggers; a cooldown keeps item spam in check.
+    aiItems(car) {
+      if (car.aiItemCooldown > 0 || !car.items.length) return;
+      car.aiItemCooldown = 0.9;
+      const item = car.items[0];
+      const deltas = this.cars.filter(c => c !== car && c.finishTime === null).map(c => c.progress - car.progress);
+      const nearestAhead = Math.min(...deltas.filter(d => d > 0)), nearestBehind = Math.max(...deltas.filter(d => d < 0));
+      if (item === 'missile' && nearestAhead < 110) this.useItem(car);
+      else if (item === 'water' && nearestAhead > 25 && nearestAhead < 75) this.useItem(car);
+      else if (item === 'magnet' && nearestAhead < 130) this.useItem(car);
+      else if (item === 'shield' && (this.missiles.some(m => m.target === car.id) || this.rand() < 0.05)) this.useItem(car);
+      else if (item === 'banana' && ((nearestBehind > -25 && nearestBehind < -2) || this.rand() < 0.08)) this.useItem(car);
+      else if (item === 'nitro' && car.nitro < 2 && Math.abs(car.steer) < 0.15 && car.speed > 25) this.useItem(car);
+    }
+    updateItems(dt) {
+      for (const box of this.boxes) {
+        box.respawn = Math.max(0, box.respawn - dt);
+        if (box.respawn > 0) continue;
+        for (const car of this.cars) {
+          if (car.finishTime !== null || car.items.length >= 2) continue;
+          if (Math.hypot(car.x - box.x, car.z - box.z) < 2.3) {
+            const item = this.rollItem(car);
+            car.items.push(item); box.respawn = 4;
+            this.events.push({ type: 'itemPickup', id: car.id, item });
+            break;
+          }
+        }
+      }
+      for (let i = this.hazards.length - 1; i >= 0; i--) {
+        const h = this.hazards[i];
+        if (h.arm > 0) {
+          h.arm -= dt;
+          if (h.kind === 'water' && h.arm <= 0) {
+            h.blast = 0.5;
+            for (const car of this.cars) if (Math.hypot(car.x - h.x, car.z - h.z) < 7) this.applyHit(car, 'water', h.from);
+          }
+        } else if (h.kind === 'banana') {
+          h.life -= dt;
+          for (const car of this.cars) {
+            if (car.finishTime !== null) continue;
+            if (Math.hypot(car.x - h.x, car.z - h.z) < 1.7) { this.applyHit(car, 'banana', h.from); h.life = 0; break; }
+          }
+          if (h.life <= 0) this.hazards.splice(i, 1);
+        } else if (h.kind === 'water') { h.blast -= dt; if (h.blast <= 0) this.hazards.splice(i, 1); }
+      }
+      for (let i = this.missiles.length - 1; i >= 0; i--) {
+        const m = this.missiles[i];
+        m.life -= dt; m.progress += 72 * dt;
+        const target = this.cars[m.target];
+        if (target && target.finishTime === null) {
+          m.lateral = approach(m.lateral, target.lateral, dt, 6);
+          if (Math.abs(target.progress - m.progress) < 3 && Math.abs(target.lateral - m.lateral) < 2.2) { this.applyHit(target, 'missile', m.from); m.life = 0; }
+        } else if (target) m.life = 0;
+        if (m.life <= 0) this.missiles.splice(i, 1);
+      }
+      for (const car of this.cars) if (car.magnet <= 0) car.magnetTarget = -1;
+    }
     resetCar(car = this.player) {
       if (this.state !== 'racing' || car.finishTime !== null || car.resetCooldown > 0) return false;
       // Reposition at or behind the last validated gate; reset cannot skip a gate.
@@ -98,7 +216,8 @@
       const progress = Math.min(car.lastSafeProgress, gate + this.track.length / this.track.gateCount - 4);
       const p = sample(this.track, progress);
       Object.assign(car, { x: p.x, z: p.z, heading: p.heading, velocityHeading: p.heading, speed: 0, drift: false,
-        progress, lastS: p.s, lateral: 0, boost: 0, resetCooldown: 2.2, wrongWay: 0, missedGate: false });
+        progress, lastS: p.s, lateral: 0, boost: 0, resetCooldown: 2.2, wrongWay: 0, missedGate: false,
+        stun: 0, slip: 0, bubble: 0, magnet: 0, magnetTarget: -1 });
       this.events.push({ type: 'reset', id: car.id });
       return true;
     }
@@ -125,30 +244,36 @@
         if (car.finishTime !== null) { car.speed *= Math.exp(-dt * 2); continue; }
         const controls = car.id === 0 ? input : this.aiInput(car);
         if (car.id && car.nitro && car.boost <= 0 && Math.abs(controls.steer) < 0.15 && car.speed > 25) this.useNitro(car);
+        if (car.id) this.aiItems(car);
         this.drive(car, controls, dt);
       }
       this.collisions();
       for (const car of this.cars) {
         if (car.finishTime === null) this.updateProgress(car, dt);
       }
+      this.updateItems(dt);
       if (this.player.finishTime !== null) { this.state = 'finished'; this.events.push({ type: 'finish' }); }
     }
     drive(car, input, dt) {
       car.bump = Math.max(0, car.bump - dt);
       car.resetCooldown = Math.max(0, car.resetCooldown - dt);
       car.boost = Math.max(0, car.boost - dt);
+      car.stun = Math.max(0, car.stun - dt); car.slip = Math.max(0, car.slip - dt);
+      car.bubble = Math.max(0, car.bubble - dt); car.magnet = Math.max(0, car.magnet - dt);
+      car.shield = Math.max(0, car.shield - dt); car.aiItemCooldown = Math.max(0, car.aiItemCooldown - dt);
       const oldDrift = car.drift;
-      const desiredSteer = clamp(Number(input.steer) || 0, -1, 1);
+      const desiredSteer = car.stun > 0 ? 0 : clamp(Number(input.steer) || 0, -1, 1);
       // Player steering ramps up faster than AI: digital keys need a snappier lock.
-      car.steer = approach(car.steer, desiredSteer, dt, car.id === 0 ? 18 : 10);
+      car.steer = approach(car.steer, car.slip > 0 ? car.slipDir : desiredSteer, dt, car.id === 0 ? 18 : 10);
       car.drift = Boolean(input.drift && car.speed > 14 && Math.abs(car.steer) > 0.16 && Math.abs(car.lateral) < this.track.width / 2);
       const offroad = Math.abs(car.lateral) > this.track.width / 2;
-      const top = offroad ? 19 : car.boost > 0 ? 61 : 42;
+      const top = car.bubble > 0 ? 12 : offroad ? 19 : car.boost > 0 ? 61 : car.magnet > 0 ? 54 : 42;
       const throttle = clamp(Number(input.throttle) || 0, 0, 1);
-      if (throttle) car.speed += (car.boost > 0 ? 34 : 20) * throttle * dt;
+      if (throttle && car.stun <= 0 && car.bubble <= 0) car.speed += (car.boost > 0 ? 34 : car.magnet > 0 ? 30 : 20) * throttle * dt;
       else car.speed = approach(car.speed, 0, dt, 0.36);
       if (input.brake) car.speed -= (car.speed > 1 ? 42 : 12) * dt;
       car.speed -= car.speed * (car.drift ? 0.16 : 0.06) * dt;
+      if (car.stun > 0) car.speed = approach(car.speed, 6, dt, 3);
       if (car.speed > top) car.speed = approach(car.speed, top, dt, offroad ? 4 : 2.8);
       car.speed = clamp(car.speed, -9, 64);
       if (Math.abs(car.speed) < 0.02) car.speed = 0;
@@ -249,7 +374,7 @@
     const ms = Math.floor(Math.max(0, seconds) * 1000);
     return `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
   }
-  const api = { Race, buildTrack, sample, project, clamp, lerp, mod, angleDelta, approach, formatTime, COLORS };
+  const api = { Race, buildTrack, buildBoxes, sample, project, clamp, lerp, mod, angleDelta, approach, formatTime, COLORS, ITEMS };
   root.KartCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

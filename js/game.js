@@ -2,7 +2,7 @@
   'use strict';
   const C = globalThis.KartCore;
   const $ = id => document.getElementById(id);
-  const dom = Object.fromEntries(['stage', 'game-canvas', 'loading', 'error-panel', 'error-message', 'start-button', 'race-hud', 'countdown', 'position', 'lap', 'race-time', 'lap-time', 'speed', 'speed-bar', 'drive-status', 'nitro-1', 'nitro-2', 'charge-bar', 'charge-label', 'minimap', 'map-title', 'leaderboard', 'pause-overlay', 'results-overlay', 'guide-overlay', 'toast', 'wrong-way', 'boost-vignette'].map(id => [id, $(id)]));
+  const dom = Object.fromEntries(['stage', 'game-canvas', 'loading', 'error-panel', 'error-message', 'start-button', 'race-hud', 'countdown', 'position', 'lap', 'race-time', 'lap-time', 'speed', 'speed-bar', 'drive-status', 'nitro-1', 'nitro-2', 'charge-bar', 'charge-label', 'minimap', 'map-title', 'leaderboard', 'pause-overlay', 'results-overlay', 'guide-overlay', 'toast', 'wrong-way', 'boost-vignette', 'item-1', 'item-2'].map(id => [id, $(id)]));
   function getSaved() {
     try {
       const saved = JSON.parse(localStorage.getItem('breeze-kart-v1'));
@@ -25,7 +25,11 @@
   let toastUntil = 0, goUntil = 0, shownCountdown = -1, resultShown = false, lastRankOrder = '', finishAudioUntil = 0, driftReadyUntil = 0;
   const driftFeedback = $('drift-feedback'), nitroPanel = $('nitro-panel');
   let guideReturnFocus = null;
-  const keys = new Set(), gameKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyR', 'Escape']);
+  const keys = new Set(), gameKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyR', 'Escape', 'ControlLeft', 'ControlRight']);
+  const ITEM_LABELS = { missile: '导弹', banana: '香蕉皮', water: '水炸弹', magnet: '磁铁', shield: '护盾', nitro: '加速器' };
+  const ITEM_ICONS = { missile: '🚀', banana: '🍌', water: '💧', magnet: '🧲', shield: '🛡️', nitro: '⚡' };
+  const ITEM_USE_TOAST = { missile: '导弹发射，锁定前方对手！', banana: '香蕉皮已丢在身后', water: '水炸弹抛出去了！', magnet: '磁铁吸附，全速追上去！', shield: '护盾开启，抵挡一次攻击', nitro: '✦ 道具氮气 +1' };
+  const ITEM_HIT_TOAST = { missile: '被导弹击中，晕头转向！', water: '被水泡困住，慢慢划！', banana: '踩到香蕉皮，打滑了！' };
   const mapCtx = dom.minimap.getContext('2d');
   function mapTransform(track, width, height, padding) {
     const b = track.bounds, scale = Math.min((width - 2 * padding) / (b.maxX - b.minX), (height - 2 * padding) / (b.maxZ - b.minZ));
@@ -124,6 +128,8 @@
     ctx.clearRect(0, 0, 280, 240); pathTrack(ctx, track, to); ctx.lineWidth = 15; ctx.strokeStyle = '#f9ffe126'; ctx.lineJoin = 'round'; ctx.stroke();
     pathTrack(ctx, track, to); ctx.lineWidth = 3; ctx.strokeStyle = '#e8f2d98c'; ctx.stroke();
     const start = to(track.samples[0]); ctx.fillStyle = '#ffffff'; ctx.fillRect(start.x - 5, start.y - 2, 10, 4);
+    ctx.fillStyle = '#ffd866';
+    for (const b of race.boxes) if (b.respawn <= 0) { const q = to(b); ctx.fillRect(q.x - 2, q.y - 2, 4, 4); }
     for (const car of [...race.cars.slice(1), race.player]) {
       const p = to(car); ctx.beginPath(); ctx.arc(p.x, p.y, car.id === 0 ? 7.5 : 4.5, 0, Math.PI * 2);
       ctx.fillStyle = car.color; ctx.fill(); ctx.lineWidth = car.id === 0 ? 3 : 1; ctx.strokeStyle = '#fffae8'; ctx.stroke();
@@ -137,8 +143,14 @@
     dom.lap.textContent = Math.min(3, p.lap); dom['race-time'].textContent = C.formatTime(race.elapsed);
     dom['lap-time'].textContent = '本圈 ' + C.formatTime(race.elapsed - p.lapStart);
     dom.speed.textContent = Math.round(Math.abs(p.speed) * 3.6); dom['speed-bar'].style.width = `${Math.min(100, Math.abs(p.speed) / 61 * 100)}%`;
-    dom['drive-status'].textContent = race.state === 'countdown' ? '准备出发' : p.boost > 0 ? '氮气加速中 ↗' : p.drift ? '漂亮漂移 ✦' : Math.abs(p.lateral) > race.track.width / 2 ? '驶回路面，恢复速度' : p.speed < -0.5 ? '倒车中' : '享受这一路的风';
+    dom['drive-status'].textContent = race.state === 'countdown' ? '准备出发' : p.stun > 0 ? '被打晕了，稳住！' : p.bubble > 0 ? '水泡围困中…' : p.slip > 0 ? '打滑中！' : p.boost > 0 ? '氮气加速中 ↗' : p.drift ? '漂亮漂移 ✦' : Math.abs(p.lateral) > race.track.width / 2 ? '驶回路面，恢复速度' : p.speed < -0.5 ? '倒车中' : '享受这一路的风';
     dom['nitro-1'].classList.toggle('filled', p.nitro >= 1); dom['nitro-2'].classList.toggle('filled', p.nitro >= 2);
+    [dom['item-1'], dom['item-2']].forEach((slot, i) => {
+      const item = p.items[i], icon = slot.querySelector('span'), text = item ? ITEM_ICONS[item] : '';
+      slot.classList.toggle('filled', Boolean(item));
+      if (icon.textContent !== text) icon.textContent = text;
+      slot.title = item ? ITEM_LABELS[item] : '空';
+    });
     dom['charge-bar'].style.width = `${p.nitro === 2 ? 100 : p.charge}%`;
     dom['charge-label'].textContent = p.nitro === 2 ? '氮气已满 · 空格释放' : p.drift ? `漂移集气 ${Math.floor(p.charge)}%` : '按住 Shift 转弯 · 漂移集气';
     const driftActive = race.state === 'racing' && p.drift;
@@ -172,13 +184,19 @@
   }
   function handleEvents() {
     for (const event of race.drainEvents()) {
+      if (event.type === 'itemHit' && world) world.hitBurst(race.cars[event.id]);
+      if (event.type === 'missileLaunch' && event.target === 0) toast('⚠ 有导弹锁定你，快开护盾！', 2400);
       if (event.id !== undefined && event.id !== 0) continue;
-      audio.event(event.type);
+      audio.event(event.type === 'itemUse' ? 'item-' + event.item : event.type);
       if (event.type === 'go') { dom.countdown.querySelector('strong').textContent = 'GO!'; dom.countdown.querySelector('span').textContent = 'MAKE IT A GOOD RIDE'; dom.countdown.querySelector('p').textContent = '向着下一阵风出发'; goUntil = performance.now() + 900; }
       if (event.type === 'charged') { world.driftBurst(); driftReadyUntil = race.elapsed + 0.85; toast('✦ 氮气就绪！按空格，全速出发'); }
       if (event.type === 'boost') toast('N₂O  氮气加速！', 950);
       if (event.type === 'lap') toast(event.lap === 3 ? '最后一圈！把快乐开到全速' : `第 ${event.lap} 圈，继续加油！`, 2000);
       if (event.type === 'reset') { world.cameraReady = false; world.resetDriftEffects(); driftReadyUntil = 0; toast('已回到赛道，重新出发', 1500); }
+      if (event.type === 'itemPickup') toast(`✦ 获得道具：${ITEM_LABELS[event.item]}`, 1400);
+      if (event.type === 'itemUse') toast(ITEM_USE_TOAST[event.item], 1500);
+      if (event.type === 'itemHit') toast(ITEM_HIT_TOAST[event.item] || '被击中了！', 2000);
+      if (event.type === 'itemBlock') toast(`护盾挡下了${ITEM_LABELS[event.item]}！`, 1800);
       if (event.type === 'finish') { finishAudioUntil = performance.now() + 1300; showResults(); }
     }
   }
@@ -252,6 +270,7 @@
     if (gameKeys.has(event.code)) event.preventDefault();
     keys.add(event.code);
     if (!event.repeat && event.code === 'Space') { if (!race.useNitro() && race.state === 'racing') toast(race.player.boost > 0 ? '正在加速，稍等一下' : '先按住 Shift 转向漂移，集满氮气', 1800); }
+    if (!event.repeat && (event.code === 'ControlLeft' || event.code === 'ControlRight')) { if (!race.useItem() && race.state === 'racing') toast('道具栏是空的，去撞赛道上的问号箱', 1800); }
     if (!event.repeat && event.code === 'KeyR') race.resetCar();
   });
   document.addEventListener('keyup', event => { keys.delete(event.code); if (!preview && gameKeys.has(event.code)) event.preventDefault(); });
@@ -287,7 +306,8 @@
   // Read-only diagnostics for QA. No test-only race controls are shipped to players.
   Object.defineProperty(window, '__kart', { value: Object.freeze({
     snapshot: () => race ? { state: race.state, preview, track: race.track.id, elapsed: race.elapsed, countdown: race.countdown,
-      player: { ...race.player, lapTimes: [...race.player.lapTimes] }, standings: race.standings().map(c => ({ id: c.id, lap: c.lap, nextGate: c.nextGate, finishTime: c.finishTime })),
+      player: { ...race.player, lapTimes: [...race.player.lapTimes], items: [...race.player.items] }, standings: race.standings().map(c => ({ id: c.id, lap: c.lap, nextGate: c.nextGate, finishTime: c.finishTime })),
+      boxes: race.boxes.filter(b => b.respawn <= 0).length, hazards: race.hazards.length, missiles: race.missiles.length,
       render: world ? world.stats() : null, audio: { enabled: sound, available: audio.available, state: audio.context?.state || 'locked' } } : null
   }), writable: false });
 })();

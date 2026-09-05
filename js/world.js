@@ -66,17 +66,17 @@
     clear() {
       if (!this.level) return;
       const geometries = new Set(), materials = new Set(), textures = new Set();
-      for (const group of [this.level, this.carsGroup, this.effectsGroup]) {
+      for (const group of [this.level, this.carsGroup, this.effectsGroup, this.itemsGroup].filter(Boolean)) {
         group.traverse(obj => { if (obj.geometry) geometries.add(obj.geometry); if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => { materials.add(m); if (m.map) textures.add(m.map); }); });
         this.scene.remove(group);
       }
       geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); textures.forEach(t => t.dispose());
-      this.materials.clear(); this.carModels = [];
+      this.materials.clear(); this.carModels = []; this.boxModels = this.bananaModels = this.missileModels = this.waterModels = [];
     }
     load(track, race) {
       this.clear(); this.track = track; this.race = race;
-      this.level = new T.Group(); this.carsGroup = new T.Group(); this.effectsGroup = new T.Group();
-      this.scene.add(this.level, this.carsGroup, this.effectsGroup);
+      this.level = new T.Group(); this.carsGroup = new T.Group(); this.effectsGroup = new T.Group(); this.itemsGroup = new T.Group();
+      this.scene.add(this.level, this.carsGroup, this.effectsGroup, this.itemsGroup);
       this.scene.background = new T.Color(track.sky); this.scene.fog = new T.Fog(track.fog, 140, 440);
       this.ambient.groundColor.set(track.theme === 'city' ? '#ac9988' : '#7f9874');
       this.sun.color.set(track.theme === 'city' ? '#ffd4a0' : '#fff3d0');
@@ -132,6 +132,7 @@
       }
       this.mergeStatic();
       for (const car of race.cars) this.carModels.push(this.createKart(car.color));
+      this.createItems(race);
       this.createEffects();
       this.cameraReady = false;
       this.update(race, 1 / 60, true);
@@ -342,7 +343,11 @@
         const flame = this.mesh(new T.ConeGeometry(0.29, 1.55, 7), new T.MeshBasicMaterial({ color: '#8aeeee', transparent: true, opacity: 0.85 }), side * 0.67, 0.5, -2.4, body);
         flame.rotation.x = -Math.PI / 2; flame.visible = false; flames.push(flame);
       }
-      return { group, body, driver, wheels, paint, flames };
+      const shieldMesh = this.mesh(new T.SphereGeometry(2.1, 18, 14), new T.MeshBasicMaterial({ color: '#7ce8c5', transparent: true, opacity: 0.22, depthWrite: false }), 0, 1.1, 0, group);
+      shieldMesh.visible = false; shieldMesh.castShadow = false;
+      const bubbleMesh = this.mesh(new T.SphereGeometry(1.9, 18, 14), new T.MeshBasicMaterial({ color: '#8ad4f5', transparent: true, opacity: 0.35, depthWrite: false }), 0, 1.1, 0, group);
+      bubbleMesh.visible = false; bubbleMesh.castShadow = false;
+      return { group, body, driver, wheels, paint, flames, shieldMesh, bubbleMesh };
     }
     setColor(color) { this.carModels[0].paint.color.set(color); }
     createParticlePool(count, spark) {
@@ -405,6 +410,75 @@
       return { mesh, count, spark, cursor: 0, active: 0,
         life: new Float32Array(count), duration: new Float32Array(count),
         velocity: new Float32Array(count * 3), size: new Float32Array(count), opacity: new Float32Array(count) };
+    }
+    // Item visuals live in itemsGroup: they move every frame, so they must never join mergeStatic's level group.
+    createItems(race) {
+      this.boxModels = race.boxes.map(box => {
+        const g = new T.Group(); g.position.set(box.x, 1.1, box.z); this.itemsGroup.add(g);
+        this.rounded(1.1, 1.1, 1.1, '#4a90d9', 0, 0, 0, g);
+        const face = this.textMaterial('?', '#4a90d9', '#fff7e3', 128, 128);
+        for (const side of [0.56, -0.56]) {
+          const q = this.mesh(new T.PlaneGeometry(0.8, 0.8), face, 0, 0, side, g);
+          q.castShadow = false; if (side < 0) q.rotation.y = Math.PI;
+        }
+        return g;
+      });
+      this.bananaModels = [];
+      for (let i = 0; i < 8; i++) {
+        const b = this.mesh(new T.TorusGeometry(0.55, 0.2, 8, 14, Math.PI * 1.35), '#f5c93f', 0, 0.3, 0, this.itemsGroup);
+        b.rotation.set(Math.PI / 2, 0, 1.1); b.visible = false; this.bananaModels.push(b);
+      }
+      this.missileModels = [];
+      for (let i = 0; i < 4; i++) {
+        const g = new T.Group(); g.visible = false; this.itemsGroup.add(g);
+        const cone = this.mesh(new T.ConeGeometry(0.35, 1.6, 8), '#d6503b', 0, 0, 0, g); cone.rotation.x = Math.PI / 2;
+        this.ball(0.3, '#fff7e3', 0, 0, 0.7, g, 1);
+        this.missileModels.push(g);
+      }
+      this.waterModels = [];
+      for (let i = 0; i < 4; i++) {
+        const g = new T.Group(); g.visible = false; this.itemsGroup.add(g);
+        const orb = this.mesh(new T.SphereGeometry(0.8, 14, 10), new T.MeshStandardMaterial({ color: '#5fb8e8', transparent: true, opacity: 0.65, roughness: 0.2 }), 0, 0, 0, g);
+        orb.castShadow = false;
+        const ring = this.mesh(new T.TorusGeometry(1, 0.18, 6, 24), new T.MeshBasicMaterial({ color: '#8ad4f5', transparent: true, opacity: 0.5, depthWrite: false }), 0, 0.4, 0, g);
+        ring.rotation.x = -Math.PI / 2; ring.castShadow = false;
+        this.waterModels.push(g);
+      }
+    }
+    updateItems(race, dt) {
+      for (let i = 0; i < race.boxes.length; i++) {
+        const mesh = this.boxModels[i];
+        mesh.visible = race.boxes[i].respawn <= 0;
+        if (mesh.visible && !this.reducedMotion) { mesh.rotation.y += dt * 1.8; mesh.position.y = 1.1 + Math.sin(this.clock * 2 + i) * 0.15; }
+      }
+      const bananas = race.hazards.filter(h => h.kind === 'banana');
+      this.bananaModels.forEach((m, i) => {
+        const h = bananas[i];
+        m.visible = Boolean(h);
+        if (h) m.position.set(h.x, 0.3, h.z);
+      });
+      const waters = race.hazards.filter(h => h.kind === 'water');
+      this.waterModels.forEach((g, i) => {
+        const h = waters[i];
+        g.visible = Boolean(h);
+        if (!h) return;
+        g.position.set(h.x, 0, h.z);
+        const orb = g.children[0], ring = g.children[1];
+        if (h.arm > 0) { orb.visible = true; orb.position.y = 0.8 + 4 * h.arm; ring.visible = false; }
+        else { orb.visible = false; ring.visible = true; ring.scale.setScalar(Math.max(0.01, (0.5 - h.blast) * 14)); }
+      });
+      this.missileModels.forEach((g, i) => {
+        const m = race.missiles[i];
+        g.visible = Boolean(m);
+        if (!m) return;
+        const p = C.sample(this.track, m.progress, m.lateral);
+        g.position.set(p.x, 0.7, p.z); g.rotation.y = p.heading;
+      });
+    }
+    hitBurst(car) {
+      if (this.reducedMotion || !this.race || this.race.state !== 'racing') return;
+      const hx = Math.sin(car.heading), hz = Math.cos(car.heading);
+      for (const side of [-1, 1]) for (let i = 0; i < Math.ceil(7 * this.effectDensity); i++) this.spawnParticle(this.sparkFX, car.x, car.z, hx, hz, side, car.speed, true);
     }
     createEffects() {
       this.sparkFX = this.createParticlePool(Math.ceil(240 * this.effectDensity), true);
@@ -534,7 +608,12 @@
         model.body.position.y = !this.reducedMotion && Math.abs(car.speed) > 2 ? Math.sin(this.clock * 25) * 0.012 : 0;
         model.wheels.forEach((w, j) => { if (j % 2 === 1) w.rotation.y = car.steer * 0.34; });
         model.flames.forEach((f, j) => { f.visible = car.boost > 0 && race.state === 'racing'; f.scale.y = this.reducedMotion ? 1 : 0.85 + Math.sin(this.clock * 47 + j) * 0.25; });
+        model.shieldMesh.visible = car.shield > 0 && race.state === 'racing';
+        model.bubbleMesh.visible = car.bubble > 0;
+        // The spin is visual only; physics heading stays put so wrong-way and gates are not disturbed.
+        model.body.rotation.y = car.stun > 0 && !this.reducedMotion ? (this.clock * 11) % (Math.PI * 2) : 0;
       }
+      this.updateItems(race, dt);
       const p = race.player;
       if (preview) {
         const s = C.sample(this.track, p.progress);
