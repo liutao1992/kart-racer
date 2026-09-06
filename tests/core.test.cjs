@@ -37,6 +37,22 @@ test('stationary turning and drift without steering do not generate nitro', () =
   for (let i = 0; i < 120; i++) race.drive(race.player, { throttle: 1, drift: true, steer: 0 }, dt);
   assert.equal(race.player.charge, 0);
 });
+test('drift exit re-centers progressively instead of snapping', () => {
+  const race = racing(), car = race.player;
+  car.speed = 30;
+  for (let i = 0; i < 180; i++) race.drive(car, { throttle: 1, drift: true, steer: 0.45 }, dt);
+  assert.equal(car.drift, true);
+  // Releasing the drift key must not re-align velocity with heading in one step.
+  race.drive(car, { throttle: 1, steer: 0.45 }, dt);
+  assert.equal(car.drift, false);
+  const earlyGap = Math.abs(C.angleDelta(car.velocityHeading, car.heading));
+  assert.ok(earlyGap > 0.02, `slide angle should fade, got ${earlyGap}`);
+  assert.ok(car.driftBlend > 0.3 && car.driftBlend < 1, `blend should be mid-fade, got ${car.driftBlend}`);
+  // Straighten the wheel: after ~0.7s the kart is fully gripped and aligned.
+  for (let i = 0; i < 45; i++) race.drive(car, { throttle: 1 }, dt);
+  assert.ok(car.driftBlend < 0.05);
+  assert.ok(Math.abs(C.angleDelta(car.velocityHeading, car.heading)) < 0.02);
+});
 test('valid drift charges bottles, capacity is two, boost consumes one and expires', () => {
   const race = racing(), car = race.player;
   car.speed = 30;
