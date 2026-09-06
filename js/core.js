@@ -84,13 +84,17 @@
   // Smart-driving keys (aiTopCap/rubber/steerGain/nitro thresholds/huntPlayer)
   // default to the classic behavior on the original three tiers; only legend
   // breaks the top-speed cap, rubber-bands around the player, and hunts them.
-  const BASE_SMART = { aiTopCap: 42, rubberGain: 0, rubberMin: 1, rubberMax: 1, steerGain: 2.2, nitroSteer: 0.15, nitroSpeed: 25, huntPlayer: false };
+  const BASE_SMART = { aiTopCap: 42, rubberGain: 0, rubberMin: 1, rubberMax: 1, steerGain: 2.2, nitroSteer: 0.15, nitroSpeed: 25, huntPlayer: false, cornerFactor: 22, cornerFloor: 19, driftCurveMin: 0.33, driftCurveMax: 1.35, driftDeltaMax: 0.7, turnBoost: 1 };
   const DIFFICULTY = {
     easy:   { ...BASE_SMART, paceBase: 0.76, paceStep: 0.017, aiTop: 41, itemCooldown: 1.15, shieldFire: 0.03, bananaFire: 0.05, wallKeep: 0.58, offroadTop: 21, resetCooldown: 2.0 },
     normal: { ...BASE_SMART, paceBase: 0.83, paceStep: 0.021, aiTop: 41, itemCooldown: 0.9,  shieldFire: 0.05, bananaFire: 0.08, wallKeep: 0.52, offroadTop: 19, resetCooldown: 2.2 },
     master: { ...BASE_SMART, paceBase: 0.90, paceStep: 0.022, aiTop: 41, itemCooldown: 0.55, shieldFire: 0.10, bananaFire: 0.15, wallKeep: 0.44, offroadTop: 16, resetCooldown: 2.6 },
     legend: { paceBase: 1.00, paceStep: 0.020, aiTop: 45, itemCooldown: 0.4, shieldFire: 0.14, bananaFire: 0.20, wallKeep: 0.38, offroadTop: 14, resetCooldown: 3.0,
-              aiTopCap: 44.5, rubberGain: 0.0006, rubberMin: 0.94, rubberMax: 1.10, steerGain: 2.6, nitroSteer: 0.28, nitroSpeed: 21, huntPlayer: true },
+              aiTopCap: 44.5, rubberGain: 0.0006, rubberMin: 0.94, rubberMax: 1.10, steerGain: 2.6, nitroSteer: 0.28, nitroSpeed: 21, huntPlayer: true,
+              cornerFactor: 22, cornerFloor: 19, driftCurveMin: 0.33, driftCurveMax: 1.35, driftDeltaMax: 0.7, turnBoost: 1 },
+    hell:   { paceBase: 1.06, paceStep: 0.018, aiTop: 47, itemCooldown: 0.3, shieldFire: 0.18, bananaFire: 0.25, wallKeep: 0.34, offroadTop: 13, resetCooldown: 3.4,
+              aiTopCap: 46, rubberGain: 0.0009, rubberMin: 0.97, rubberMax: 1.20, steerGain: 3.0, nitroSteer: 0.32, nitroSpeed: 19, huntPlayer: true,
+              cornerFactor: 16, cornerFloor: 28, driftCurveMin: 0.20, driftCurveMax: 1.9, driftDeltaMax: 1.1, turnBoost: 1.35 },
   };
   class Race {
     constructor(track, color = COLORS[0], rng = Math.random, difficulty = 'normal') {
@@ -267,8 +271,8 @@
       // rubberGain is 0 on classic tiers, making this an exact identity there.
       const gap = this.player.progress - car.progress;
       const paceEff = car.aiPace * clamp(1 + gap * this.difficulty.rubberGain, this.difficulty.rubberMin, this.difficulty.rubberMax);
-      const target = clamp(43 - curve * 22, 19, this.difficulty.aiTop) * paceEff;
-      return { throttle: car.speed < target ? 1 : 0, brake: car.speed > target + 2, steer: clamp(delta * this.difficulty.steerGain, -1, 1), drift: curve > 0.33 && curve < 1.35 && car.speed > 21 && Math.abs(delta) < 0.7 };
+      const target = clamp(43 - curve * this.difficulty.cornerFactor, this.difficulty.cornerFloor, this.difficulty.aiTop) * paceEff;
+      return { throttle: car.speed < target ? 1 : 0, brake: car.speed > target + 2, steer: clamp(delta * this.difficulty.steerGain, -1, 1), drift: curve > this.difficulty.driftCurveMin && curve < this.difficulty.driftCurveMax && car.speed > 21 && Math.abs(delta) < this.difficulty.driftDeltaMax };
     }
     step(dt, input = {}) {
       if (this.state === 'countdown') {
@@ -322,7 +326,7 @@
       car.speed = clamp(car.speed, -9, 64);
       if (Math.abs(car.speed) < 0.02) car.speed = 0;
       const speedFactor = clamp(Math.abs(car.speed) / 12, 0, 1);
-      const turnRate = (1.15 - clamp(Math.abs(car.speed) / 70, 0, 0.65)) * (car.drift ? 1.65 : 1) * (car.id === 0 ? 1.25 : 1);
+      const turnRate = (1.15 - clamp(Math.abs(car.speed) / 70, 0, 0.65)) * (car.drift ? 1.65 : 1) * (car.id === 0 ? 1.25 : this.difficulty.turnBoost);
       car.heading += car.steer * turnRate * speedFactor * dt * (car.speed < 0 ? -1 : 1);
       const slipTarget = car.heading - (car.drift ? car.steer * 0.37 : 0);
       car.velocityHeading += angleDelta(slipTarget, car.velocityHeading) * (1 - Math.exp(-dt * (car.drift ? 5.5 : 12)));

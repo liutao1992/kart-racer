@@ -12,7 +12,7 @@
   const saved = getSaved();
   let sound = saved.sound !== false, color = ['#f17b46', '#3fafa7', '#8596d3'].includes(saved.color) ? saved.color : '#f17b46';
   let selectedIndex = Math.max(0, KartTracks.findIndex(t => t.id === saved.track));
-  const DIFFICULTY_LABELS = { easy: '轻松', normal: '标准', master: '大师', legend: '车神' };
+  const DIFFICULTY_LABELS = { easy: '轻松', normal: '标准', master: '大师', legend: '车神', hell: '地狱' };
   let difficulty = Object.hasOwn(DIFFICULTY_LABELS, saved.difficulty) ? saved.difficulty : 'normal';
   // Records are scoped per track AND difficulty: `coast:master`. Legacy v1
   // records keyed by plain track id are kept and treated as normal-tier bests.
@@ -53,7 +53,7 @@
   function thumbnail(canvas, track) {
     canvas.width = 190; canvas.height = 135;
     const ctx = canvas.getContext('2d'), to = mapTransform(track, 190, 135, 21);
-    const THUMB_BG = { coast: '#c4e2d7', forest: '#d0dbbf', city: '#e6d3c0', desert: '#eed9ae', snow: '#dde8f0', neon: '#252b4d', sky: '#cfe2f2', volcano: '#d8b28e' };
+    const THUMB_BG = { coast: '#c4e2d7', forest: '#d0dbbf', city: '#e6d3c0', desert: '#eed9ae', snow: '#dde8f0', neon: '#252b4d', sky: '#cfe2f2', volcano: '#d8b28e', akina: '#e0d0b2' };
     ctx.fillStyle = THUMB_BG[track.theme] || '#e6d3c0'; ctx.fillRect(0, 0, 190, 135);
     ctx.fillStyle = track.ground; ctx.beginPath(); ctx.ellipse(95, 73, 84, 69, -0.17, 0, Math.PI * 2); ctx.fill();
     pathTrack(ctx, track, to); ctx.lineJoin = 'round'; ctx.lineWidth = 16; ctx.strokeStyle = track.sand; ctx.stroke();
@@ -72,7 +72,7 @@
       const text = document.createElement('span'), strong = document.createElement('strong'), small = document.createElement('small');
       strong.textContent = track.name;
       const difficulty = document.createElement('span'); difficulty.className = 'difficulty';
-      for (let j = 0; j < 3; j++) { const bar = document.createElement('i'); if (j < track.level) bar.className = 'on'; difficulty.append(bar); }
+      for (let j = 0; j < Math.max(3, track.level); j++) { const bar = document.createElement('i'); if (j < track.level) bar.className = 'on'; difficulty.append(bar); }
       small.append(difficulty, document.createTextNode(track.difficulty)); text.append(strong, small); button.append(text);
       const check = document.createElement('span'); check.className = 'track-check'; check.textContent = '✓'; check.setAttribute('aria-hidden', 'true'); button.append(check);
       button.addEventListener('click', () => { if (preview) selectTrack(i); }); list.append(button);

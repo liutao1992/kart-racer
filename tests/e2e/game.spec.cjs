@@ -11,7 +11,7 @@ test('menu, local rendering, all tracks, color selection, guide and responsive l
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await loaded(page);
   await expect(page).toHaveTitle(/风驰卡丁车/);
-  await expect(page.locator('.track-card')).toHaveCount(8);
+  await expect(page.locator('.track-card')).toHaveCount(9);
   await page.screenshot({ path: info.outputPath('menu-desktop.png'), fullPage: true });
   for (const track of tracks) {
     await page.locator(`[data-track="${track.id}"]`).click();
@@ -302,4 +302,11 @@ test('difficulty selection persists and scopes records per tier', async ({ page 
   expect((await snapshot(page)).difficulty).toBe('legend');
   await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
   await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'legend');
+  // The hell tier is selectable and persists too.
+  await page.locator('[data-difficulty="hell"]').click();
+  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'hell');
+  expect((await snapshot(page)).difficulty).toBe('hell');
+  await expect(page.locator('#best-time')).toContainText('新的赛道');
+  await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
+  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'hell');
 });
