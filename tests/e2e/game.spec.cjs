@@ -272,6 +272,105 @@ test('item system: HUD slots, empty-inventory hint and live boxes in snapshot', 
   await expect(page.locator('#toast')).toContainText('道具栏');
 });
 
+test('control mode switch swaps hints and persists across reloads', async ({ page }) => {
+  await loaded(page);
+  await expect(page.locator('.control-choice.selected')).toHaveAttribute('data-control', 'keyboard');
+  await page.locator('[data-control="gamepad"]').click();
+  await expect(page.locator('.control-choice.selected')).toHaveAttribute('data-control', 'gamepad');
+  await expect(page.locator('#gamepad-status')).toContainText('未检测到手柄');
+  await expect(page.locator('#control-strip .ctl-gp').first()).toBeVisible();
+  await expect(page.locator('#control-strip .ctl-kb').first()).toBeHidden();
+  // The guide always shows both control schemes, labeled side by side.
+  await page.locator('#guide-button').click();
+  const controls = page.locator('.guide-controls');
+  await expect(controls).toHaveCount(2);
+  await expect(controls.nth(0)).toContainText('加速前进');
+  await expect(controls.nth(1)).toContainText('RT');
+  await expect(page.locator('.guide-tip').nth(1)).toContainText('标准映射');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#guide-overlay')).toBeHidden();
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('breeze-kart-v1'))).controlMode).toBe('gamepad');
+  await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
+  await expect(page.locator('.control-choice.selected')).toHaveAttribute('data-control', 'gamepad');
+  await page.locator('[data-control="keyboard"]').click();
+  await expect(page.locator('#control-strip .ctl-kb').first()).toBeVisible();
+  await expect(page.locator('#control-strip .ctl-gp').first()).toBeHidden();
+});
+
+// Playwright has no Gamepad API support: mock navigator.getGamepads with a
+// mutable pad object the test drives via page.evaluate.
+async function mockGamepad(page) {
+  await page.addInitScript(() => {
+    const pad = { id: 'MockPad (STANDARD GAMEPAD Vendor: 0000 Product: 0000)', index: 0, mapping: 'standard', connected: true, timestamp: 0,
+      axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })) };
+    window.__mockPad = pad;
+    navigator.getGamepads = () => [pad, null, null, null];
+  });
+}
+async function tapPadButton(page, index) {
+  await page.evaluate(i => { const b = window.__mockPad.buttons[i]; b.pressed = true; b.value = 1; }, index);
+  await page.clock.fastForward(100);
+  await page.evaluate(i => { const b = window.__mockPad.buttons[i]; b.pressed = false; b.value = 0; }, index);
+  await page.clock.fastForward(100);
+}
+
+test('keyboard mode ignores a connected gamepad entirely', async ({ page }) => {
+  await mockGamepad(page);
+  await loaded(page); await page.clock.install();
+  await page.locator('#start-button').click();
+  await page.evaluate(() => { const b = window.__mockPad.buttons[7]; b.pressed = true; b.value = 1; });
+  for (let i = 0; i < 45; i++) await page.clock.fastForward(100);
+  const snap = await snapshot(page);
+  expect(snap.state).toBe('racing');
+  expect(Math.abs(snap.player.speed)).toBeLessThan(0.5);
+});
+
+test('gamepad mode: analog driving, edge actions, pause and disconnect', async ({ page }, info) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await mockGamepad(page);
+  await loaded(page); await page.clock.install();
+  await page.locator('[data-control="gamepad"]').click();
+  await expect(page.locator('#gamepad-status')).toContainText('已连接');
+  await page.locator('#start-button').click();
+  // Keyboard driving keys are ignored in gamepad mode.
+  await page.keyboard.down('ArrowUp');
+  for (let i = 0; i < 45; i++) await page.clock.fastForward(100);
+  let snap = await snapshot(page);
+  expect(snap.state).toBe('racing');
+  expect(Math.abs(snap.player.speed)).toBeLessThan(0.5);
+  await page.keyboard.up('ArrowUp');
+  // RT analog throttle accelerates the kart.
+  await page.evaluate(() => { const b = window.__mockPad.buttons[7]; b.pressed = true; b.value = 1; });
+  let driven;
+  for (let i = 0; i < 60; i++) { await page.clock.fastForward(100); driven = await snapshot(page); if (driven.player.speed > 20 && i >= 8) break; }
+  expect(driven.player.speed).toBeGreaterThan(18);
+  // Stick left turns left: same positive heading change as ArrowLeft.
+  const before = driven.player.heading;
+  await page.evaluate(() => { window.__mockPad.axes[0] = -1; });
+  for (let i = 0; i < 5; i++) await page.clock.fastForward(100);
+  const after = (await snapshot(page)).player.heading;
+  expect(after - before).toBeGreaterThan(0.05);
+  await page.evaluate(() => { window.__mockPad.axes[0] = 0; const b = window.__mockPad.buttons[7]; b.pressed = false; b.value = 0; });
+  await page.screenshot({ path: info.outputPath('gamepad-driving.png') });
+  // B (nitro) without charge shows the gamepad-specific hint.
+  await tapPadButton(page, 1);
+  await expect(page.locator('#toast')).toContainText('A/LB');
+  // Start pauses, Start again resumes.
+  await tapPadButton(page, 9);
+  await expect(page.locator('#pause-overlay')).toBeVisible();
+  await tapPadButton(page, 9);
+  await expect(page.locator('#pause-overlay')).toBeHidden();
+  expect((await snapshot(page)).state).toBe('racing');
+  // Disconnecting the pad mid-race pauses automatically.
+  await page.evaluate(() => {
+    window.__mockPad.connected = false;
+    const event = new Event('gamepaddisconnected'); event.gamepad = window.__mockPad; window.dispatchEvent(event);
+  });
+  await expect(page.locator('#pause-overlay')).toBeVisible();
+  expect((await snapshot(page)).state).toBe('paused');
+  expect(errors).toEqual([]);
+});
+
 test('difficulty selection persists and scopes records per tier', async ({ page }) => {
   // Synthetic legacy save: a pre-difficulty record keyed by plain track id.
   // Seeded only when absent, so the reload below re-reads what the game
@@ -283,17 +382,17 @@ test('difficulty selection persists and scopes records per tier', async ({ page 
   });
   await loaded(page);
   // Legacy records migrate to the normal tier; normal is the default choice.
-  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'normal');
+  await expect(page.locator('.difficulty-choice.selected[data-difficulty]')).toHaveAttribute('data-difficulty', 'normal');
   expect((await snapshot(page)).difficulty).toBe('normal');
   await expect(page.locator('#best-time')).toContainText('个人最佳（标准）');
   // Master tier has its own, still empty record slot.
   await page.locator('[data-difficulty="master"]').click();
-  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'master');
+  await expect(page.locator('.difficulty-choice.selected[data-difficulty]')).toHaveAttribute('data-difficulty', 'master');
   expect((await snapshot(page)).difficulty).toBe('master');
   await expect(page.locator('#best-time')).toContainText('新的赛道');
   // The choice survives a reload, and tier-scoped records stay apart.
   await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
-  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'master');
+  await expect(page.locator('.difficulty-choice.selected[data-difficulty]')).toHaveAttribute('data-difficulty', 'master');
   await expect(page.locator('#best-time')).toContainText('新的赛道');
   await page.locator('[data-difficulty="normal"]').click();
   await expect(page.locator('#best-time')).toContainText('个人最佳（标准）');
@@ -301,12 +400,12 @@ test('difficulty selection persists and scopes records per tier', async ({ page 
   await page.locator('[data-difficulty="legend"]').click();
   expect((await snapshot(page)).difficulty).toBe('legend');
   await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
-  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'legend');
+  await expect(page.locator('.difficulty-choice.selected[data-difficulty]')).toHaveAttribute('data-difficulty', 'legend');
   // The hell tier is selectable and persists too.
   await page.locator('[data-difficulty="hell"]').click();
-  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'hell');
+  await expect(page.locator('.difficulty-choice.selected[data-difficulty]')).toHaveAttribute('data-difficulty', 'hell');
   expect((await snapshot(page)).difficulty).toBe('hell');
   await expect(page.locator('#best-time')).toContainText('新的赛道');
   await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
-  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'hell');
+  await expect(page.locator('.difficulty-choice.selected[data-difficulty]')).toHaveAttribute('data-difficulty', 'hell');
 });
