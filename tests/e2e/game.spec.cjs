@@ -271,3 +271,30 @@ test('item system: HUD slots, empty-inventory hint and live boxes in snapshot', 
   await page.keyboard.press('ControlLeft');
   await expect(page.locator('#toast')).toContainText('道具栏');
 });
+
+test('difficulty selection persists and scopes records per tier', async ({ page }) => {
+  // Synthetic legacy save: a pre-difficulty record keyed by plain track id.
+  // Seeded only when absent, so the reload below re-reads what the game
+  // itself persisted (difficulty choice included) instead of being stomped.
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('breeze-kart-v1')) {
+      localStorage.setItem('breeze-kart-v1', JSON.stringify({ sound: true, color: '#f17b46', track: 'coast', records: { coast: 80 } }));
+    }
+  });
+  await loaded(page);
+  // Legacy records migrate to the normal tier; normal is the default choice.
+  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'normal');
+  expect((await snapshot(page)).difficulty).toBe('normal');
+  await expect(page.locator('#best-time')).toContainText('个人最佳（标准）');
+  // Master tier has its own, still empty record slot.
+  await page.locator('[data-difficulty="master"]').click();
+  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'master');
+  expect((await snapshot(page)).difficulty).toBe('master');
+  await expect(page.locator('#best-time')).toContainText('新的赛道');
+  // The choice survives a reload, and tier-scoped records stay apart.
+  await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
+  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'master');
+  await expect(page.locator('#best-time')).toContainText('新的赛道');
+  await page.locator('[data-difficulty="normal"]').click();
+  await expect(page.locator('#best-time')).toContainText('个人最佳（标准）');
+});

@@ -34,15 +34,20 @@ for (const track of tracks) {
   }
   assert.ok(worst >= minSep, `${track.id}: corridors ${worst.toFixed(1)} apart at s=${worstPair} (need >= ${minSep.toFixed(1)})`);
 
-  // AI pace: all five computer drivers must finish three laps under 200s sim time.
-  const race = new C.Race(track, '#f17b46', lcg(track.level * 31 + 5));
-  race.start();
-  for (let i = 0; i < 205; i++) race.step(dt);
-  assert.equal(race.state, 'racing', `${track.id}: countdown never ended`);
-  for (let i = 0; i < 60 * 200 && race.finishedCount < 5; i++) race.step(dt);
-  assert.equal(race.finishedCount, 5, `${track.id}: AI never finished`);
-  const slowest = Math.max(...race.cars.slice(1).map(c => c.finishTime));
-  assert.ok(slowest < 200, `${track.id}: slowest AI ${slowest.toFixed(1)}s >= 200s`);
-  console.log(`${track.id.padEnd(8)} len=${track.length.toFixed(1).padStart(7)} openTurn=${openTurn.toFixed(3)} corridor=${worst.toFixed(1).padStart(5)} aiWorst=${slowest.toFixed(1)}s`);
+  // AI pace: all five computer drivers must finish three laps under 200s sim
+  // time, on every difficulty tier — a future tuning change must not strand AI.
+  const worsts = {};
+  for (const diff of ['easy', 'normal', 'master']) {
+    const race = new C.Race(track, '#f17b46', lcg(track.level * 31 + 5), diff);
+    race.start();
+    for (let i = 0; i < 205; i++) race.step(dt);
+    assert.equal(race.state, 'racing', `${track.id}@${diff}: countdown never ended`);
+    for (let i = 0; i < 60 * 200 && race.finishedCount < 5; i++) race.step(dt);
+    assert.equal(race.finishedCount, 5, `${track.id}@${diff}: AI never finished`);
+    const slowest = Math.max(...race.cars.slice(1).map(c => c.finishTime));
+    assert.ok(slowest < 200, `${track.id}@${diff}: slowest AI ${slowest.toFixed(1)}s >= 200s`);
+    worsts[diff] = slowest;
+  }
+  console.log(`${track.id.padEnd(8)} len=${track.length.toFixed(1).padStart(7)} openTurn=${openTurn.toFixed(3)} corridor=${worst.toFixed(1).padStart(5)} aiWorst easy=${worsts.easy.toFixed(1)} normal=${worsts.normal.toFixed(1)} master=${worsts.master.toFixed(1)}`);
 }
 console.log(`${tracks.length} tracks OK`);

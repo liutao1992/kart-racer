@@ -315,3 +315,70 @@ test('lightning and UFO only show up for midfield and trailing drivers', () => {
   race.player.progress = 1000;
   for (let i = 0; i < 600; i++) assert.notEqual(race.rollItem(race.player), 'ufo');
 });
+
+// --- Difficulty tiers ---
+function diffRace(track, diff, seed = 7) {
+  const race = new C.Race(track, '#f17b46', lcg(seed), diff);
+  race.start(); for (let i = 0; i < 205; i++) race.step(dt);
+  return race;
+}
+function simWorstAi(track, diff) {
+  const race = diffRace(track, diff, track.level * 31 + 5);
+  for (let i = 0; i < 60 * 200 && race.finishedCount < 5; i++) race.step(dt);
+  assert.equal(race.finishedCount, 5);
+  return Math.max(...race.cars.slice(1).map(c => c.finishTime));
+}
+test('difficulty: default and explicit normal share identical AI pacing', () => {
+  const expected = [0.83, 0.851, 0.872, 0.893, 0.914, 0.935];
+  for (const race of [new C.Race(TRACKS[0]), new C.Race(TRACKS[0], C.COLORS[0], Math.random, 'normal')]) {
+    assert.equal(race.difficultyKey, 'normal');
+    race.cars.forEach((car, id) => assert.ok(Math.abs(car.aiPace - expected[id]) < 1e-9));
+  }
+});
+test('difficulty: an unknown key falls back to normal', () => {
+  const race = new C.Race(TRACKS[0], C.COLORS[0], Math.random, 'insane');
+  assert.equal(race.difficultyKey, 'normal');
+  assert.equal(race.difficulty, C.DIFFICULTY.normal);
+});
+test('difficulty: master AI outrun normal AI on the same track and seed', () => {
+  // Neon has the longest straights, where the pace gap shows most clearly.
+  const neon = TRACKS.find(t => t.id === 'neon');
+  const normal = simWorstAi(neon, 'normal'), master = simWorstAi(neon, 'master');
+  assert.ok(master < normal - 3, `master ${master.toFixed(1)} should clearly beat normal ${normal.toFixed(1)}`);
+});
+test('difficulty: master AI still finish three laps inside the sim budget (volcano worst case)', () => {
+  const volcano = TRACKS.find(t => t.id === 'volcano');
+  const race = diffRace(volcano, 'master', volcano.level * 31 + 5);
+  for (let i = 0; i < 60 * 200 && race.finishedCount < 5; i++) race.step(dt);
+  assert.equal(race.finishedCount, 5);
+  for (const car of race.cars.slice(1)) assert.ok(car.finishTime < 200);
+});
+test('difficulty: mistake penalties scale — offroad top speed, wall impact, reset lockout', () => {
+  const offroadSpeeds = {};
+  for (const diff of ['easy', 'normal', 'master']) {
+    const race = diffRace(TRACKS[0], diff), car = race.player;
+    car.lateral = race.track.width / 2 + 1; car.speed = 40;
+    for (let i = 0; i < 300; i++) { race.drive(car, { throttle: 1 }, dt); car.lateral = race.track.width / 2 + 1; }
+    offroadSpeeds[diff] = car.speed;
+    const wall = diffRace(TRACKS[0], diff), w = wall.player;
+    positionCar(wall, 20, wall.track.width); w.speed = 30;
+    wall.updateProgress(w, dt);
+    if (diff === 'master') assert.ok(w.speed < 14, `master wall should nearly stop the car, got ${w.speed.toFixed(1)}`);
+    wall.resetCar();
+    assert.equal(wall.player.resetCooldown, C.DIFFICULTY[diff].resetCooldown);
+  }
+  assert.ok(offroadSpeeds.master < offroadSpeeds.normal && offroadSpeeds.normal < offroadSpeeds.easy);
+  assert.ok(offroadSpeeds.master < 21.5 && offroadSpeeds.easy > 24);
+});
+test('difficulty: master AI re-fire items much sooner than normal AI', () => {
+  const cooldowns = {};
+  for (const diff of ['easy', 'normal', 'master']) {
+    const race = diffRace(TRACKS[0], diff), ai = race.cars[1];
+    ai.items = ['lightning'];
+    race.aiItems(ai);
+    cooldowns[diff] = ai.aiItemCooldown;
+  }
+  assert.equal(cooldowns.easy, 1.15);
+  assert.equal(cooldowns.normal, 0.9);
+  assert.equal(cooldowns.master, 0.55);
+});
