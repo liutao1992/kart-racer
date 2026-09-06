@@ -81,10 +81,16 @@
   // Difficulty tiers: normal mirrors the original constants exactly. AI pace and
   // item aggression scale per tier; wall/offroad/reset penalties only bite the
   // player in practice (AI reset at half+2, before ever touching a wall).
+  // Smart-driving keys (aiTopCap/rubber/steerGain/nitro thresholds/huntPlayer)
+  // default to the classic behavior on the original three tiers; only legend
+  // breaks the top-speed cap, rubber-bands around the player, and hunts them.
+  const BASE_SMART = { aiTopCap: 42, rubberGain: 0, rubberMin: 1, rubberMax: 1, steerGain: 2.2, nitroSteer: 0.15, nitroSpeed: 25, huntPlayer: false };
   const DIFFICULTY = {
-    easy:   { paceBase: 0.76, paceStep: 0.017, aiTop: 41, itemCooldown: 1.15, shieldFire: 0.03, bananaFire: 0.05, wallKeep: 0.58, offroadTop: 21, resetCooldown: 2.0 },
-    normal: { paceBase: 0.83, paceStep: 0.021, aiTop: 41, itemCooldown: 0.9,  shieldFire: 0.05, bananaFire: 0.08, wallKeep: 0.52, offroadTop: 19, resetCooldown: 2.2 },
-    master: { paceBase: 0.90, paceStep: 0.022, aiTop: 41, itemCooldown: 0.55, shieldFire: 0.10, bananaFire: 0.15, wallKeep: 0.44, offroadTop: 16, resetCooldown: 2.6 },
+    easy:   { ...BASE_SMART, paceBase: 0.76, paceStep: 0.017, aiTop: 41, itemCooldown: 1.15, shieldFire: 0.03, bananaFire: 0.05, wallKeep: 0.58, offroadTop: 21, resetCooldown: 2.0 },
+    normal: { ...BASE_SMART, paceBase: 0.83, paceStep: 0.021, aiTop: 41, itemCooldown: 0.9,  shieldFire: 0.05, bananaFire: 0.08, wallKeep: 0.52, offroadTop: 19, resetCooldown: 2.2 },
+    master: { ...BASE_SMART, paceBase: 0.90, paceStep: 0.022, aiTop: 41, itemCooldown: 0.55, shieldFire: 0.10, bananaFire: 0.15, wallKeep: 0.44, offroadTop: 16, resetCooldown: 2.6 },
+    legend: { paceBase: 1.00, paceStep: 0.020, aiTop: 45, itemCooldown: 0.4, shieldFire: 0.14, bananaFire: 0.20, wallKeep: 0.38, offroadTop: 14, resetCooldown: 3.0,
+              aiTopCap: 44.5, rubberGain: 0.0006, rubberMin: 0.94, rubberMax: 1.10, steerGain: 2.6, nitroSteer: 0.28, nitroSpeed: 21, huntPlayer: true },
   };
   class Race {
     constructor(track, color = COLORS[0], rng = Math.random, difficulty = 'normal') {
@@ -150,7 +156,11 @@
         if (!target || target === car) return refund();
         this.applyHit(target, 'ufo', car.id);
       } else if (item === 'missile') {
-        const order = this.standings(), rank = order.indexOf(car), target = rank > 0 ? order[rank - 1] : null;
+        const order = this.standings(), rank = order.indexOf(car);
+        let target = rank > 0 ? order[rank - 1] : null;
+        // Legend AI jump the queue: any in-range player takes priority over rank order.
+        const pd = this.player.finishTime === null ? this.player.progress - car.progress : Infinity;
+        if (this.difficulty.huntPlayer && pd > 0 && pd < 110) target = this.player;
         this.missiles.push({ from: car.id, target: target ? target.id : -1, progress: car.progress, lateral: car.lateral, life: 4 });
         this.events.push({ type: 'missileLaunch', id: car.id, target: target ? target.id : -1 });
       }
@@ -179,12 +189,16 @@
       const item = car.items[0];
       const deltas = this.cars.filter(c => c !== car && c.finishTime === null).map(c => c.progress - car.progress);
       const nearestAhead = Math.min(...deltas.filter(d => d > 0)), nearestBehind = Math.max(...deltas.filter(d => d < 0));
+      // Hunt-the-player tactics (legend only): lightning is held until the
+      // player leads, and bananas cover a wider window when the player chases.
+      const hunt = this.difficulty.huntPlayer && this.player.finishTime === null;
+      const playerDelta = hunt ? this.player.progress - car.progress : Infinity;
       if (item === 'missile' && nearestAhead < 110) this.useItem(car);
       else if (item === 'water' && nearestAhead > 25 && nearestAhead < 75) this.useItem(car);
       else if (item === 'magnet' && nearestAhead < 130) this.useItem(car);
       else if (item === 'shield' && (this.missiles.some(m => m.target === car.id) || this.rand() < this.difficulty.shieldFire)) this.useItem(car);
-      else if (item === 'banana' && ((nearestBehind > -25 && nearestBehind < -2) || this.rand() < this.difficulty.bananaFire)) this.useItem(car);
-      else if (item === 'lightning') this.useItem(car);
+      else if (item === 'banana' && ((nearestBehind > -25 && nearestBehind < -2) || (playerDelta > -40 && playerDelta < -2) || this.rand() < this.difficulty.bananaFire)) this.useItem(car);
+      else if (item === 'lightning' && (playerDelta > 0 || !hunt)) this.useItem(car);
       else if (item === 'ufo') this.useItem(car);
       else if (item === 'nitro' && car.nitro < 2 && Math.abs(car.steer) < 0.15 && car.speed > 25) this.useItem(car);
     }
@@ -249,8 +263,12 @@
       const later = sample(this.track, car.progress + 34);
       const delta = angleDelta(Math.atan2(ahead.x - car.x, ahead.z - car.z), car.heading);
       const curve = Math.abs(angleDelta(later.heading, here.heading));
-      const target = clamp(43 - curve * 22, 19, this.difficulty.aiTop) * car.aiPace;
-      return { throttle: car.speed < target ? 1 : 0, brake: car.speed > target + 2, steer: clamp(delta * 2.2, -1, 1), drift: curve > 0.33 && curve < 1.35 && car.speed > 21 && Math.abs(delta) < 0.7 };
+      // Rubber band: chase the player when behind them, ease off when ahead.
+      // rubberGain is 0 on classic tiers, making this an exact identity there.
+      const gap = this.player.progress - car.progress;
+      const paceEff = car.aiPace * clamp(1 + gap * this.difficulty.rubberGain, this.difficulty.rubberMin, this.difficulty.rubberMax);
+      const target = clamp(43 - curve * 22, 19, this.difficulty.aiTop) * paceEff;
+      return { throttle: car.speed < target ? 1 : 0, brake: car.speed > target + 2, steer: clamp(delta * this.difficulty.steerGain, -1, 1), drift: curve > 0.33 && curve < 1.35 && car.speed > 21 && Math.abs(delta) < 0.7 };
     }
     step(dt, input = {}) {
       if (this.state === 'countdown') {
@@ -265,7 +283,7 @@
       for (const car of this.cars) {
         if (car.finishTime !== null) { car.speed *= Math.exp(-dt * 2); continue; }
         const controls = car.id === 0 ? input : this.aiInput(car);
-        if (car.id && car.nitro && car.boost <= 0 && Math.abs(controls.steer) < 0.15 && car.speed > 25) this.useNitro(car);
+        if (car.id && car.nitro && car.boost <= 0 && Math.abs(controls.steer) < this.difficulty.nitroSteer && car.speed > this.difficulty.nitroSpeed) this.useNitro(car);
         if (car.id) this.aiItems(car);
         this.drive(car, controls, dt);
       }
@@ -290,7 +308,7 @@
       car.steer = approach(car.steer, car.slip > 0 ? car.slipDir : desiredSteer, dt, car.id === 0 ? 18 : 10);
       car.drift = Boolean(input.drift && car.speed > 14 && Math.abs(car.steer) > 0.16 && Math.abs(car.lateral) < this.track.width / 2);
       const offroad = Math.abs(car.lateral) > this.track.width / 2;
-      const top = car.bubble > 0 ? 12 : offroad ? this.difficulty.offroadTop : car.boost > 0 ? 61 : car.magnet > 0 ? 54 : 42;
+      const top = car.bubble > 0 ? 12 : offroad ? this.difficulty.offroadTop : car.boost > 0 ? 61 : car.magnet > 0 ? 54 : (car.id === 0 ? 42 : this.difficulty.aiTopCap);
       const throttle = clamp(Number(input.throttle) || 0, 0, 1);
       if (throttle && car.stun <= 0 && car.bubble <= 0) car.speed += (car.boost > 0 ? 34 : car.magnet > 0 ? 30 : 20) * throttle * dt;
       else car.speed = approach(car.speed, 0, dt, 0.36);
