@@ -78,8 +78,10 @@
       this.level = new T.Group(); this.carsGroup = new T.Group(); this.effectsGroup = new T.Group(); this.itemsGroup = new T.Group();
       this.scene.add(this.level, this.carsGroup, this.effectsGroup, this.itemsGroup);
       this.scene.background = new T.Color(track.sky); this.scene.fog = new T.Fog(track.fog, 140, 440);
-      this.ambient.groundColor.set(track.theme === 'city' ? '#ac9988' : '#7f9874');
-      this.sun.color.set(track.theme === 'city' ? '#ffd4a0' : '#fff3d0');
+      const THEME_LIGHT = { city: ['#ac9988', '#ffd4a0'], desert: ['#a08b6d', '#ffe0b0'], snow: ['#8fa4b8', '#fff8ec'], neon: ['#3a4258', '#b9c8ff'], sky: ['#8a9cb0', '#fff3d0'], volcano: ['#6b5148', '#ffc9a0'] };
+      const [lightGround, lightSun] = THEME_LIGHT[track.theme] || ['#7f9874', '#fff3d0'];
+      this.ambient.groundColor.set(lightGround);
+      this.sun.color.set(lightSun);
       const { minX, maxX, minZ, maxZ } = track.bounds;
       this.center = new T.Vector3((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
       const water = this.mesh(new T.PlaneGeometry(2400, 2400), track.water, this.center.x, -0.75, this.center.z);
@@ -103,6 +105,21 @@
         } else if (track.theme === 'forest') {
           if (i % 7 === 0) this.rock(x, z, rand);
           else this.pine(x, z, 0.8 + rand() * 1.1, rand);
+        } else if (track.theme === 'desert') {
+          if (i % 3 === 0) this.rock(x, z, rand, ['#c9a06a', '#b8895a', '#d4b483']);
+          else this.cactus(x, z, 0.8 + rand() * 0.8, rand);
+        } else if (track.theme === 'snow') {
+          if (i % 5 === 0) this.rock(x, z, rand, ['#dfe8ee', '#cdd9e2', '#e8f0f5']);
+          else this.pine(x, z, 0.8 + rand() * 1.1, rand, ['#7fa3b8', '#9cb8c8', '#b8ccd8'], '#8a7a66');
+        } else if (track.theme === 'neon') {
+          if (i % 9 === 0) this.neonSign(x, z, rand);
+          else this.building(x, z, rand, ['#3a4060', '#2e3350', '#454a6e', '#323856', '#3d3550'], ['#f554c0', '#34e0e8', '#ffd54a', '#7cf5d3'], '#232848');
+        } else if (track.theme === 'sky') {
+          if (i % 3 === 0) this.rock(x, z, rand, ['#e8eef4', '#d5e0ea', '#f0f5f9']);
+          else this.cloudPuff(x, z, rand);
+        } else if (track.theme === 'volcano') {
+          if (i % 2 === 0) this.rock(x, z, rand, ['#4a3c34', '#5c4a40', '#6b5548']);
+          else this.lavaPool(x, z, rand);
         } else {
           if (i % 4 === 0) this.roundTree(x, z, 0.8 + rand() * 0.4);
           else if (i % 2 === 0) this.building(x, z, rand);
@@ -115,12 +132,15 @@
       for (let i = 0; i < 17; i++) {
         const theta = i * Math.PI * 2 / 17;
         const x = this.center.x + Math.cos(theta) * (rx + 55 + rand() * 25), z = this.center.z + Math.sin(theta) * (rz + 55 + rand() * 25);
-        if (track.theme !== 'city' && i % 2 === 0) {
-          const hill = this.mesh(new T.ConeGeometry(20 + rand() * 25, 25 + rand() * 22, 7), i % 3 ? '#9bc59d' : '#bed4ac', x, 8, z);
+        const HILL_COLORS = { desert: ['#e0b97e', '#d1a66b'], snow: ['#dfe9f2', '#cddcea'], sky: ['#e8f0f8', '#d5e4f2'], volcano: ['#6b5548', '#54423a'] };
+        if (!['city', 'neon'].includes(track.theme) && i % 2 === 0) {
+          const hillColors = HILL_COLORS[track.theme] || ['#9bc59d', '#bed4ac'];
+          const hill = this.mesh(new T.ConeGeometry(20 + rand() * 25, 25 + rand() * 22, 7), i % 3 ? hillColors[0] : hillColors[1], x, 8, z);
           hill.rotation.y = rand() * 5; hill.castShadow = false;
         }
+        const cloudColor = track.theme === 'neon' ? '#c8d0e8' : track.theme === 'volcano' ? '#d8c4b0' : '#fffdf0';
         for (let j = 0; j < 4; j++) {
-          const cloud = this.ball(5 + rand() * 5, '#fffdf0', x + j * 6, 45 + Math.sin(i) * 13 + rand() * 2, z, this.level, 2);
+          const cloud = this.ball(5 + rand() * 5, cloudColor, x + j * 6, 45 + Math.sin(i) * 13 + rand() * 2, z, this.level, 2);
           cloud.scale.set(1.4, 0.6, 0.8); cloud.castShadow = false;
         }
         if (track.theme === 'coast') {
@@ -206,20 +226,20 @@
       this.ball(0.38, '#987153', 0.8, 6.4, 0.3, group); this.ball(0.3, '#a47d53', 0.15, 6.5, -0.25, group);
       const bush = this.ball(1.1, '#8eb871', 1.5, 0.7, 0.4, group); bush.scale.y = 0.75;
     }
-    pine(x, z, scale, rand) {
+    pine(x, z, scale, rand, greens = ['#467765', '#508b6d', '#6a9d76'], trunk = '#9f8560') {
       const group = new T.Group(); group.position.set(x, 0, z); group.scale.setScalar(scale); this.level.add(group);
-      this.mesh(new T.CylinderGeometry(0.35, 0.5, 3, 6), '#9f8560', 0, 1.5, 0, group);
-      for (let i = 0; i < 3; i++) { const tree = this.mesh(new T.ConeGeometry(3.0 - i * 0.67, 4.4 - i * 0.6, 7), ['#467765', '#508b6d', '#6a9d76'][i], 0, 3.1 + i * 1.8, 0, group); tree.rotation.y = rand(); }
+      this.mesh(new T.CylinderGeometry(0.35, 0.5, 3, 6), trunk, 0, 1.5, 0, group);
+      for (let i = 0; i < 3; i++) { const tree = this.mesh(new T.ConeGeometry(3.0 - i * 0.67, 4.4 - i * 0.6, 7), greens[i], 0, 3.1 + i * 1.8, 0, group); tree.rotation.y = rand(); }
     }
     roundTree(x, z, scale) {
       this.mesh(new T.CylinderGeometry(0.32, 0.4, 4 * scale, 7), '#b29977', x, 2 * scale, z);
       const crown = this.ball(2.6 * scale, '#8cae7d', x, 4.8 * scale, z, this.level, 2); crown.scale.y = 1.12;
       this.ball(1.7 * scale, '#adc38a', x - scale, 4.5 * scale, z + scale);
     }
-    rock(x, z, rand) {
+    rock(x, z, rand, colors = ['#b9b6a1', '#a5b8a0', '#9ab479']) {
       const r = 1.3 + rand() * 2;
-      const rock = this.ball(r, rand() > 0.5 ? '#b9b6a1' : '#a5b8a0', x, r * 0.43, z); rock.scale.set(1.3, 0.72, 1); rock.rotation.set(rand(), rand(), rand());
-      for (let i = 0; i < 2; i++) this.ball(0.65, '#9ab479', x + i * 1.5, 0.35, z + r);
+      const rock = this.ball(r, rand() > 0.5 ? colors[0] : colors[1], x, r * 0.43, z); rock.scale.set(1.3, 0.72, 1); rock.rotation.set(rand(), rand(), rand());
+      for (let i = 0; i < 2; i++) this.ball(0.65, colors[2], x + i * 1.5, 0.35, z + r);
     }
     hut(x, z, rand) {
       const g = new T.Group(); g.position.set(x, 0, z); g.rotation.y = rand() * 6; this.level.add(g);
@@ -228,14 +248,42 @@
       this.box(1, 2, 0.1, '#698c82', 0, 1.2, 2.2, g);
       for (const side of [-1, 1]) this.box(0.85, 0.85, 0.12, '#ebf3d9', side * 1.5, 2, 2.21, g);
     }
-    building(x, z, rand) {
+    building(x, z, rand, facades = ['#dba994', '#a7b9b1', '#dfc9a6', '#b5bec3', '#cfb9a9'], windows = ['#7c989b', '#f4d4a5'], roof = '#eee5d0') {
       const w = 6 + rand() * 5, h = 7 + rand() * 17, d = 6 + rand() * 4;
-      const colors = ['#dba994', '#a7b9b1', '#dfc9a6', '#b5bec3', '#cfb9a9'];
-      this.box(w, h, d, colors[Math.floor(rand() * colors.length)], x, h / 2, z);
-      this.box(w + 0.5, 0.5, d + 0.5, '#eee5d0', x, h, z);
+      this.box(w, h, d, facades[Math.floor(rand() * facades.length)], x, h / 2, z);
+      this.box(w + 0.5, 0.5, d + 0.5, roof, x, h, z);
       for (let y = 2; y < h - 1; y += 2.6) for (let dx = -w / 2 + 1.3; dx < w / 2 - 0.5; dx += 2) {
-        for (const side of [-1, 1]) this.box(0.85, 1.25, 0.06, rand() > 0.3 ? '#7c989b' : '#f4d4a5', x + dx, y, z + side * (d / 2 + 0.04));
+        for (const side of [-1, 1]) this.box(0.85, 1.25, 0.06, windows[Math.floor(rand() * windows.length)], x + dx, y, z + side * (d / 2 + 0.04));
       }
+    }
+    cactus(x, z, scale, rand) {
+      const g = new T.Group(); g.position.set(x, 0, z); g.rotation.y = rand() * 6; g.scale.setScalar(scale); this.level.add(g);
+      this.mesh(new T.CylinderGeometry(0.5, 0.62, 4.6, 8), '#5e8c4a', 0, 2.3, 0, g);
+      for (const side of [-1, 1]) {
+        this.mesh(new T.CylinderGeometry(0.32, 0.36, 1.7, 7), '#6a9c54', side * 1.05, 2.7 + rand(), 0, g);
+        const arm = this.mesh(new T.CylinderGeometry(0.32, 0.32, 1.35, 7), '#6a9c54', side * 0.62, 2.15 + rand() * 0.4, 0, g);
+        arm.rotation.z = side * Math.PI / 2;
+      }
+      this.ball(0.2, '#e89bb4', 0, 4.75, 0, g);
+    }
+    cloudPuff(x, z, rand) {
+      for (let i = 0; i < 3; i++) {
+        const puff = this.ball(1.6 + rand() * 1.6, i % 2 ? '#eef4fa' : '#ffffff', x + i * 2.1 - 2, 0.9 + rand() * 0.4, z + rand() * 1.4, this.level, 2);
+        puff.scale.y = 0.55; puff.castShadow = false;
+      }
+    }
+    lavaPool(x, z, rand) {
+      const r = 2 + rand() * 2.5;
+      const pool = this.mesh(new T.CylinderGeometry(r, r * 1.06, 0.18, 20), '#e86a2a', x, 0.05, z);
+      pool.castShadow = false;
+      const core = this.mesh(new T.CylinderGeometry(r * 0.55, r * 0.55, 0.2, 16), '#ffb347', x, 0.06, z);
+      core.castShadow = false;
+    }
+    neonSign(x, z, rand) {
+      const texts = ['NEON', '极速', '24H', 'DRIFT'];
+      const colors = ['#f554c0', '#34e0e8', '#ffd54a', '#7cf5d3'];
+      const i = Math.floor(rand() * texts.length);
+      this.billboard(x, z, texts[i], colors[(i + Math.floor(rand() * colors.length)) % colors.length], rand() * 6);
     }
     textMaterial(text, background, foreground = '#fff7e3', width = 768, height = 160) {
       const c = document.createElement('canvas'); c.width = width; c.height = height;

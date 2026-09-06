@@ -8,6 +8,7 @@
     "start": "node scripts/serve.cjs",
     "vendor": "node scripts/vendor.cjs",
     "check": "node --check js/tracks.js && node --check js/core.js && node --check js/world.js && node --check js/audio.js && node --check js/game.js",
+    "check:tracks": "node scripts/validate-tracks.cjs",
     "test": "node --test tests/core.test.cjs",
     "test:e2e": "playwright test"
   },

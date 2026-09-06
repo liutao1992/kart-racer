@@ -41,7 +41,8 @@
   function thumbnail(canvas, track) {
     canvas.width = 190; canvas.height = 135;
     const ctx = canvas.getContext('2d'), to = mapTransform(track, 190, 135, 21);
-    ctx.fillStyle = track.theme === 'coast' ? '#c4e2d7' : track.theme === 'forest' ? '#d0dbbf' : '#e6d3c0'; ctx.fillRect(0, 0, 190, 135);
+    const THUMB_BG = { coast: '#c4e2d7', forest: '#d0dbbf', city: '#e6d3c0', desert: '#eed9ae', snow: '#dde8f0', neon: '#252b4d', sky: '#cfe2f2', volcano: '#d8b28e' };
+    ctx.fillStyle = THUMB_BG[track.theme] || '#e6d3c0'; ctx.fillRect(0, 0, 190, 135);
     ctx.fillStyle = track.ground; ctx.beginPath(); ctx.ellipse(95, 73, 84, 69, -0.17, 0, Math.PI * 2); ctx.fill();
     pathTrack(ctx, track, to); ctx.lineJoin = 'round'; ctx.lineWidth = 16; ctx.strokeStyle = track.sand; ctx.stroke();
     pathTrack(ctx, track, to); ctx.lineWidth = 9; ctx.strokeStyle = '#677e72'; ctx.stroke();
@@ -52,6 +53,7 @@
   }
   function buildTrackButtons() {
     const list = $('track-list');
+    $('preview-number').querySelector('span').textContent = ' / ' + String(tracks.length).padStart(2, '0');
     tracks.forEach((track, i) => {
       const button = document.createElement('button'); button.className = 'track-card'; button.dataset.track = track.id; button.setAttribute('aria-label', `${track.name}，${track.difficulty}`);
       const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true'); button.append(canvas); thumbnail(canvas, track);

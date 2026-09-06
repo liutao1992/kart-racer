@@ -8,8 +8,8 @@ function positionCar(race, s, offset = 0) { const p = C.sample(race.track, s, of
 const lcg = seed => () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
 function itemRace(seed = 7, track = TRACKS[0]) { const race = new C.Race(track, '#f17b46', lcg(seed)); race.start(); for (let i = 0; i < 205; i++) race.step(dt); assert.equal(race.state, 'racing'); return race; }
 
-test('three tracks are continuous, distinct, and have stable arc-length sampling', () => {
-  assert.equal(new Set(TRACKS.map(t => t.length)).size, 3);
+test('all tracks are continuous, distinct, and have stable arc-length sampling', () => {
+  assert.equal(new Set(TRACKS.map(t => t.length)).size, TRACKS.length);
   for (const track of TRACKS) {
     assert.ok(track.length > 600 && track.length < 1200);
     assert.ok(Math.abs(C.angleDelta(C.sample(track, 0.001).heading, C.sample(track, track.length - 0.001).heading)) < 0.01);

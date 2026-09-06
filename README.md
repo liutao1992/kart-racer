@@ -48,11 +48,12 @@ Three.js 从 [官方 npm 包](https://www.npmjs.com/package/three/v/0.180.0) 构
 ```sh
 npm ci
 npm run check
+npm run check:tracks
 npm test
 npm run test:e2e
 ```
 
-核心测试覆盖检查点、逆行、氮气、碰撞、暂停、排名、三条赛道电脑完赛与重开。浏览器测试通过真实键盘输入检查驾驶、漂移、加速、结算，并用实际渲染镜头验证方向键和 A/D 在普通驾驶、漂移时的左右转向。另覆盖断网直接打开、存储受限、画面不支持与不同窗口尺寸。测试失败保留截图与 trace，HTML 报告在 `playwright-report`。
+核心测试覆盖检查点、逆行、氮气、碰撞、暂停、排名、八条赛道电脑完赛与重开。浏览器测试通过真实键盘输入检查驾驶、漂移、加速、结算，并用实际渲染镜头验证方向键和 A/D 在普通驾驶、漂移时的左右转向。另覆盖断网直接打开、存储受限、画面不支持与不同窗口尺寸。测试失败保留截图与 trace，HTML 报告在 `playwright-report`。
 
 如测试机器没有 Playwright Chromium，先运行 `npx playwright install chromium`，或使用 `BREEZE_BROWSER_PATH=/path/to/chromium npm run test:e2e`。macOS 上也会识别已有 Playwright Chromium 缓存。
 

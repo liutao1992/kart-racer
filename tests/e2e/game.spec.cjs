@@ -11,7 +11,7 @@ test('menu, local rendering, all tracks, color selection, guide and responsive l
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await loaded(page);
   await expect(page).toHaveTitle(/风驰卡丁车/);
-  await expect(page.locator('.track-card')).toHaveCount(3);
+  await expect(page.locator('.track-card')).toHaveCount(8);
   await page.screenshot({ path: info.outputPath('menu-desktop.png'), fullPage: true });
   for (const track of tracks) {
     await page.locator(`[data-track="${track.id}"]`).click();
