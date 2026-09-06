@@ -297,4 +297,9 @@ test('difficulty selection persists and scopes records per tier', async ({ page 
   await expect(page.locator('#best-time')).toContainText('新的赛道');
   await page.locator('[data-difficulty="normal"]').click();
   await expect(page.locator('#best-time')).toContainText('个人最佳（标准）');
+  // The legend tier is selectable and persists as well.
+  await page.locator('[data-difficulty="legend"]').click();
+  expect((await snapshot(page)).difficulty).toBe('legend');
+  await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
+  await expect(page.locator('.difficulty-choice.selected')).toHaveAttribute('data-difficulty', 'legend');
 });

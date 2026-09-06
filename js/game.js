@@ -12,7 +12,7 @@
   const saved = getSaved();
   let sound = saved.sound !== false, color = ['#f17b46', '#3fafa7', '#8596d3'].includes(saved.color) ? saved.color : '#f17b46';
   let selectedIndex = Math.max(0, KartTracks.findIndex(t => t.id === saved.track));
-  const DIFFICULTY_LABELS = { easy: '轻松', normal: '标准', master: '大师' };
+  const DIFFICULTY_LABELS = { easy: '轻松', normal: '标准', master: '大师', legend: '车神' };
   let difficulty = Object.hasOwn(DIFFICULTY_LABELS, saved.difficulty) ? saved.difficulty : 'normal';
   // Records are scoped per track AND difficulty: `coast:master`. Legacy v1
   // records keyed by plain track id are kept and treated as normal-tier bests.

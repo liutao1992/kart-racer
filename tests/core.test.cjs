@@ -382,3 +382,101 @@ test('difficulty: master AI re-fire items much sooner than normal AI', () => {
   assert.equal(cooldowns.normal, 0.9);
   assert.equal(cooldowns.master, 0.55);
 });
+
+// --- Legend tier: smarter, faster, and out to get the player ---
+test('difficulty: legend config is complete and classic tiers keep default smart-driving keys', () => {
+  for (const tier of ['easy', 'normal', 'master']) {
+    const d = C.DIFFICULTY[tier];
+    assert.deepEqual([d.aiTopCap, d.rubberGain, d.rubberMin, d.rubberMax, d.steerGain, d.nitroSteer, d.nitroSpeed, d.huntPlayer],
+      [42, 0, 1, 1, 2.2, 0.15, 25, false]);
+  }
+  const d = C.DIFFICULTY.legend;
+  assert.equal(d.aiTopCap, 44.5); assert.ok(d.rubberGain > 0); assert.equal(d.huntPlayer, true);
+  assert.equal(new C.Race(TRACKS[0], C.COLORS[0], Math.random, 'legend').difficultyKey, 'legend');
+});
+test('difficulty: legend AI break the classic 42 top speed that caps the player', () => {
+  const race = diffRace(TRACKS[0], 'legend');
+  let aiMax = 0, playerMax = 0;
+  for (let i = 0; i < 900; i++) {
+    race.step(dt, { throttle: 1 });
+    for (const c of race.cars.slice(1)) if (c.boost <= 0) aiMax = Math.max(aiMax, c.speed);
+    if (race.player.boost <= 0) playerMax = Math.max(playerMax, race.player.speed);
+  }
+  assert.ok(aiMax > 42.5, `legend AI should beat the classic 42 cap, got ${aiMax.toFixed(2)}`);
+  assert.ok(playerMax <= 43, `player stays at the classic cap, got ${playerMax.toFixed(2)}`);
+});
+test('difficulty: legend AI outrun master AI on the same track and seed', () => {
+  const neon = TRACKS.find(t => t.id === 'neon');
+  const master = simWorstAi(neon, 'master'), legend = simWorstAi(neon, 'legend');
+  assert.ok(legend < master - 3, `legend ${legend.toFixed(1)} should clearly beat master ${master.toFixed(1)}`);
+});
+test('difficulty: legend AI still finish three laps inside the sim budget (volcano worst case)', () => {
+  const volcano = TRACKS.find(t => t.id === 'volcano');
+  const race = diffRace(volcano, 'legend', volcano.level * 31 + 5);
+  for (let i = 0; i < 60 * 200 && race.finishedCount < 5; i++) race.step(dt);
+  assert.equal(race.finishedCount, 5);
+  for (const car of race.cars.slice(1)) assert.ok(car.finishTime < 200);
+});
+test('difficulty: legend rubber band — faster when chasing the player, floored when far ahead', () => {
+  const coast = TRACKS[0];
+  const probe = gapSetup => {
+    const race = diffRace(coast, 'legend', 1);
+    const ai = race.cars[5];
+    for (let i = 0; i < 600; i++) { race.step(dt); race.player.progress = ai.progress + gapSetup; }
+    return ai.speed;
+  };
+  const chasing = probe(150), leading = probe(-150), farAhead = probe(-5000);
+  assert.ok(chasing > leading + 3, `chasing ${chasing.toFixed(1)} should clearly beat leading ${leading.toFixed(1)}`);
+  assert.ok(Math.abs(farAhead - leading) < 1, `rubber floor clamps: ${farAhead.toFixed(1)} vs ${leading.toFixed(1)}`);
+  // Classic tiers have no rubber band at all.
+  const flat = gapSetup => {
+    const race = diffRace(coast, 'normal', 1);
+    const ai = race.cars[5];
+    for (let i = 0; i < 600; i++) { race.step(dt); race.player.progress = ai.progress + gapSetup; }
+    return ai.speed;
+  };
+  assert.ok(Math.abs(flat(150) - flat(-150)) < 1, 'normal tier pace ignores the player gap');
+});
+test('difficulty: legend items hunt the player — missile queue-jump, held lightning, wider banana window', () => {
+  const coast = TRACKS[0], still = () => 0.99; // random fire never triggers
+  // Missile: another AI is the rank-above target, but the player is in range.
+  for (const diff of ['normal', 'legend']) {
+    const race = diffRace(coast, diff, 1); race.rand = still;
+    const ai = race.cars[1];
+    race.player.progress = ai.progress + 100; race.cars[2].progress = ai.progress + 30;
+    for (const c of race.cars.slice(3)) c.progress = ai.progress - 50;
+    ai.items = ['missile']; race.aiItems(ai);
+    assert.equal(race.missiles[0].target, diff === 'legend' ? 0 : 2, `${diff} missile target`);
+  }
+  // Lightning: legend holds it until the player leads; normal fires instantly.
+  for (const diff of ['normal', 'legend']) {
+    const race = diffRace(coast, diff, 1); race.rand = still;
+    const ai = race.cars[1];
+    race.player.progress = ai.progress - 50;
+    ai.items = ['lightning']; race.aiItems(ai);
+    assert.equal(ai.items.length, diff === 'legend' ? 1 : 0, `${diff} lightning while player behind`);
+    race.player.progress = ai.progress + 50; ai.aiItemCooldown = 0; race.aiItems(ai);
+    assert.equal(ai.items.length, 0, `${diff} lightning once player leads`);
+  }
+  // Banana: the player 35 behind is outside the classic 25-window, inside legend's 40.
+  for (const diff of ['normal', 'legend']) {
+    const race = diffRace(coast, diff, 1); race.rand = still;
+    const ai = race.cars[1];
+    race.player.progress = ai.progress - 35;
+    for (const c of race.cars.slice(2)) c.progress = ai.progress + 200;
+    ai.items = ['banana']; race.aiItems(ai);
+    assert.equal(race.hazards.length > 0, diff === 'legend', `${diff} banana for chasing player`);
+  }
+});
+test('difficulty: legend mistakes hurt more — wall, offroad, reset lockout', () => {
+  const race = diffRace(TRACKS[0], 'legend'), car = race.player;
+  car.lateral = race.track.width / 2 + 1; car.speed = 40;
+  for (let i = 0; i < 300; i++) { race.drive(car, { throttle: 1 }, dt); car.lateral = race.track.width / 2 + 1; }
+  assert.ok(car.speed < 19.5, `legend offroad should crawl below master's 20.5, got ${car.speed.toFixed(1)}`);
+  const wall = diffRace(TRACKS[0], 'legend'), w = wall.player;
+  positionCar(wall, 20, wall.track.width); w.speed = 30;
+  wall.updateProgress(w, dt);
+  assert.ok(w.speed < 12.5, `legend wall should nearly stop the car, got ${w.speed.toFixed(1)}`);
+  wall.resetCar();
+  assert.equal(wall.player.resetCooldown, 3.0);
+});
