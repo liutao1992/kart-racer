@@ -387,11 +387,13 @@ test('difficulty: master AI re-fire items much sooner than normal AI', () => {
 test('difficulty: legend config is complete and classic tiers keep default smart-driving keys', () => {
   for (const tier of ['easy', 'normal', 'master']) {
     const d = C.DIFFICULTY[tier];
-    assert.deepEqual([d.aiTopCap, d.rubberGain, d.rubberMin, d.rubberMax, d.steerGain, d.nitroSteer, d.nitroSpeed, d.huntPlayer],
-      [42, 0, 1, 1, 2.2, 0.15, 25, false]);
+    assert.deepEqual([d.aiTopCap, d.rubberGain, d.rubberMin, d.rubberMax, d.steerGain, d.nitroSteer, d.nitroSpeed, d.huntPlayer, d.cornerFactor, d.cornerFloor, d.driftCurveMin, d.driftCurveMax, d.driftDeltaMax, d.turnBoost],
+      [42, 0, 1, 1, 2.2, 0.15, 25, false, 22, 19, 0.33, 1.35, 0.7, 1]);
   }
   const d = C.DIFFICULTY.legend;
   assert.equal(d.aiTopCap, 44.5); assert.ok(d.rubberGain > 0); assert.equal(d.huntPlayer, true);
+  // Legend keeps the classic cornering tune; only hell corners harder.
+  assert.deepEqual([d.cornerFactor, d.cornerFloor, d.driftCurveMin, d.driftCurveMax, d.driftDeltaMax, d.turnBoost], [22, 19, 0.33, 1.35, 0.7, 1]);
   assert.equal(new C.Race(TRACKS[0], C.COLORS[0], Math.random, 'legend').difficultyKey, 'legend');
 });
 test('difficulty: legend AI break the classic 42 top speed that caps the player', () => {
@@ -479,4 +481,37 @@ test('difficulty: legend mistakes hurt more — wall, offroad, reset lockout', (
   assert.ok(w.speed < 12.5, `legend wall should nearly stop the car, got ${w.speed.toFixed(1)}`);
   wall.resetCar();
   assert.equal(wall.player.resetCooldown, 3.0);
+});
+
+// --- Hell tier: touge-master cornering on top of everything legend has ---
+test('difficulty: hell config is complete and out-tunes legend on every cornering lever', () => {
+  const d = C.DIFFICULTY.hell, legend = C.DIFFICULTY.legend;
+  assert.equal(d.paceBase, 1.06); assert.equal(d.aiTop, 47); assert.equal(d.aiTopCap, 46);
+  assert.ok(d.rubberGain > legend.rubberGain); assert.equal(d.huntPlayer, true);
+  assert.ok(d.cornerFactor < legend.cornerFactor); assert.ok(d.cornerFloor > legend.cornerFloor);
+  assert.ok(d.driftCurveMin < legend.driftCurveMin); assert.ok(d.driftCurveMax > legend.driftCurveMax);
+  assert.ok(d.driftDeltaMax > legend.driftDeltaMax); assert.ok(d.turnBoost > legend.turnBoost);
+  assert.equal(new C.Race(TRACKS[0], C.COLORS[0], Math.random, 'hell').difficultyKey, 'hell');
+});
+test('difficulty: hell AI outrun legend AI on the same track and seed', () => {
+  const neon = TRACKS.find(t => t.id === 'neon');
+  const legend = simWorstAi(neon, 'legend'), hell = simWorstAi(neon, 'hell');
+  assert.ok(hell < legend - 3, `hell ${hell.toFixed(1)} should clearly beat legend ${legend.toFixed(1)}`);
+});
+test('difficulty: hell AI finish volcano inside budget with no reset-skipped gates', () => {
+  const volcano = TRACKS.find(t => t.id === 'volcano');
+  const race = diffRace(volcano, 'hell', volcano.level * 31 + 5);
+  for (let i = 0; i < 60 * 200 && race.finishedCount < 5; i++) race.step(dt);
+  assert.equal(race.finishedCount, 5);
+  for (const car of race.cars.slice(1)) { assert.ok(car.finishTime < 200); assert.equal(car.nextGate, 37); }
+});
+test('difficulty: hell AI carry touge-master corner speed past legend (volcano)', () => {
+  const volcano = TRACKS.find(t => t.id === 'volcano');
+  const best = diff => {
+    const race = diffRace(volcano, diff, 129);
+    for (let i = 0; i < 60 * 200 && race.finishedCount < 5; i++) race.step(dt);
+    return Math.min(...race.cars.slice(1).map(c => c.finishTime));
+  };
+  const legend = best('legend'), hell = best('hell');
+  assert.ok(hell < legend - 2, `hell fastest ${hell.toFixed(1)} should beat legend fastest ${legend.toFixed(1)}`);
 });

@@ -78,7 +78,7 @@
       this.level = new T.Group(); this.carsGroup = new T.Group(); this.effectsGroup = new T.Group(); this.itemsGroup = new T.Group();
       this.scene.add(this.level, this.carsGroup, this.effectsGroup, this.itemsGroup);
       this.scene.background = new T.Color(track.sky); this.scene.fog = new T.Fog(track.fog, 140, 440);
-      const THEME_LIGHT = { city: ['#ac9988', '#ffd4a0'], desert: ['#a08b6d', '#ffe0b0'], snow: ['#8fa4b8', '#fff8ec'], neon: ['#3a4258', '#b9c8ff'], sky: ['#8a9cb0', '#fff3d0'], volcano: ['#6b5148', '#ffc9a0'] };
+      const THEME_LIGHT = { city: ['#ac9988', '#ffd4a0'], desert: ['#a08b6d', '#ffe0b0'], snow: ['#8fa4b8', '#fff8ec'], neon: ['#3a4258', '#b9c8ff'], sky: ['#8a9cb0', '#fff3d0'], volcano: ['#6b5148', '#ffc9a0'], akina: ['#8a8262', '#ffd9a8'] };
       const [lightGround, lightSun] = THEME_LIGHT[track.theme] || ['#7f9874', '#fff3d0'];
       this.ambient.groundColor.set(lightGround);
       this.sun.color.set(lightSun);
@@ -120,6 +120,9 @@
         } else if (track.theme === 'volcano') {
           if (i % 2 === 0) this.rock(x, z, rand, ['#4a3c34', '#5c4a40', '#6b5548']);
           else this.lavaPool(x, z, rand);
+        } else if (track.theme === 'akina') {
+          if (i % 6 === 0) this.rock(x, z, rand, ['#8a8272', '#9a9282', '#7a7262']);
+          else this.pine(x, z, 0.8 + rand() * 1.2, rand, ['#7a8a52', '#8a9a5e', '#6b7a4a'], '#5c4a38');
         } else {
           if (i % 4 === 0) this.roundTree(x, z, 0.8 + rand() * 0.4);
           else if (i % 2 === 0) this.building(x, z, rand);
@@ -132,13 +135,13 @@
       for (let i = 0; i < 17; i++) {
         const theta = i * Math.PI * 2 / 17;
         const x = this.center.x + Math.cos(theta) * (rx + 55 + rand() * 25), z = this.center.z + Math.sin(theta) * (rz + 55 + rand() * 25);
-        const HILL_COLORS = { desert: ['#e0b97e', '#d1a66b'], snow: ['#dfe9f2', '#cddcea'], sky: ['#e8f0f8', '#d5e4f2'], volcano: ['#6b5548', '#54423a'] };
+        const HILL_COLORS = { desert: ['#e0b97e', '#d1a66b'], snow: ['#dfe9f2', '#cddcea'], sky: ['#e8f0f8', '#d5e4f2'], volcano: ['#6b5548', '#54423a'], akina: ['#8a9668', '#7a8a5c'] };
         if (!['city', 'neon'].includes(track.theme) && i % 2 === 0) {
           const hillColors = HILL_COLORS[track.theme] || ['#9bc59d', '#bed4ac'];
           const hill = this.mesh(new T.ConeGeometry(20 + rand() * 25, 25 + rand() * 22, 7), i % 3 ? hillColors[0] : hillColors[1], x, 8, z);
           hill.rotation.y = rand() * 5; hill.castShadow = false;
         }
-        const cloudColor = track.theme === 'neon' ? '#c8d0e8' : track.theme === 'volcano' ? '#d8c4b0' : '#fffdf0';
+        const cloudColor = track.theme === 'neon' ? '#c8d0e8' : track.theme === 'volcano' ? '#d8c4b0' : track.theme === 'akina' ? '#f5e6cc' : '#fffdf0';
         for (let j = 0; j < 4; j++) {
           const cloud = this.ball(5 + rand() * 5, cloudColor, x + j * 6, 45 + Math.sin(i) * 13 + rand() * 2, z, this.level, 2);
           cloud.scale.set(1.4, 0.6, 0.8); cloud.castShadow = false;
