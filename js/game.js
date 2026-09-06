@@ -14,6 +14,9 @@
   let selectedIndex = Math.max(0, KartTracks.findIndex(t => t.id === saved.track));
   const DIFFICULTY_LABELS = { easy: '轻松', normal: '标准', master: '大师', legend: '车神', hell: '地狱' };
   let difficulty = Object.hasOwn(DIFFICULTY_LABELS, saved.difficulty) ? saved.difficulty : 'normal';
+  const CONTROL_MODES = ['keyboard', 'gamepad'];
+  let controlMode = CONTROL_MODES.includes(saved.controlMode) ? saved.controlMode : 'keyboard';
+  const usingPad = () => controlMode === 'gamepad';
   // Records are scoped per track AND difficulty: `coast:master`. Legacy v1
   // records keyed by plain track id are kept and treated as normal-tier bests.
   const records = Object.create(null);
@@ -30,7 +33,7 @@
   }
   const recordKey = trackId => `${trackId}:${difficulty}`;
   function persist() {
-    try { localStorage.setItem('breeze-kart-v1', JSON.stringify({ sound, color, track: tracks[selectedIndex].id, difficulty, records })); } catch { /* Private browsing or blocked storage does not prevent racing. */ }
+    try { localStorage.setItem('breeze-kart-v1', JSON.stringify({ sound, color, track: tracks[selectedIndex].id, difficulty, controlMode, records })); } catch { /* Private browsing or blocked storage does not prevent racing. */ }
   }
   const tracks = KartTracks.map(C.buildTrack), audio = new KartAudio(sound);
   let world = null, race = null, preview = true, accumulator = 0, previousFrame = 0, hudTimer = 0;
@@ -88,7 +91,7 @@
     const best = records[recordKey(track.id)];
     $('best-time').textContent = best ? `个人最佳（${DIFFICULTY_LABELS[difficulty]}） ${C.formatTime(best)}` : '新的赛道，等你留下纪录';
     document.querySelectorAll('.color-choice').forEach(button => { button.classList.toggle('selected', button.dataset.color === color); button.setAttribute('aria-pressed', String(button.dataset.color === color)); });
-    document.querySelectorAll('.difficulty-choice').forEach(button => { button.classList.toggle('selected', button.dataset.difficulty === difficulty); button.setAttribute('aria-pressed', String(button.dataset.difficulty === difficulty)); });
+    document.querySelectorAll('.difficulty-choice:not(.control-choice)').forEach(button => { button.classList.toggle('selected', button.dataset.difficulty === difficulty); button.setAttribute('aria-pressed', String(button.dataset.difficulty === difficulty)); });
   }
   function selectTrack(index) {
     selectedIndex = index; race = new C.Race(tracks[index], color, Math.random, difficulty); resultShown = false;
@@ -99,20 +102,37 @@
     if (!preview || tier === difficulty || !Object.hasOwn(DIFFICULTY_LABELS, tier)) return;
     difficulty = tier; selectTrack(selectedIndex);
   }
+  function updateGamepadStatus() {
+    const label = KartGamepad.label();
+    $('gamepad-status').textContent = label ? `已连接 · ${label.slice(0, 24)}` : '未检测到手柄';
+  }
+  // Swap every keyboard hint (.ctl-kb) with its gamepad counterpart (.ctl-gp).
+  function updateControlUI() {
+    document.querySelectorAll('.control-choice').forEach(button => { const on = button.dataset.control === controlMode; button.classList.toggle('selected', on); button.setAttribute('aria-pressed', String(on)); });
+    document.querySelectorAll('.ctl-kb').forEach(el => el.hidden = usingPad());
+    document.querySelectorAll('.ctl-gp').forEach(el => el.hidden = !usingPad());
+    dom['game-canvas'].setAttribute('aria-label', usingPad() ? '游戏画面，使用手柄左摇杆转向，RT 油门，A 漂移，B 氮气，X 使用道具' : '游戏画面，使用方向键驾驶，Shift 漂移，空格氮气，Ctrl 使用道具');
+    updateGamepadStatus();
+  }
+  function selectControlMode(mode) {
+    if (!preview || mode === controlMode || !CONTROL_MODES.includes(mode)) return;
+    controlMode = mode; KartGamepad.setEnabled(usingPad()); updateControlUI(); persist();
+    if (usingPad() && !KartGamepad.connected()) toast('未检测到手柄，连接后按手柄任意键唤醒', 2500);
+  }
   function toast(message, duration = 2200) { dom.toast.textContent = message; dom.toast.hidden = false; toastUntil = performance.now() + duration; }
   function startRace() {
     if (!world || dom['guide-overlay'].hidden === false) return;
     void audio.unlock();
-    keys.clear(); preview = false; resultShown = false; accumulator = 0; shownCountdown = -1; lastRankOrder = ''; finishAudioUntil = 0; goUntil = 0; driftReadyUntil = 0;
+    keys.clear(); KartGamepad.resetEdges(); preview = false; resultShown = false; accumulator = 0; shownCountdown = -1; lastRankOrder = ''; finishAudioUntil = 0; goUntil = 0; driftReadyUntil = 0;
     race = new C.Race(tracks[selectedIndex], color, Math.random, difficulty); world.load(tracks[selectedIndex], race);
     race.start();
     document.body.classList.add('racing');
     dom['race-hud'].hidden = false; dom['pause-overlay'].hidden = true; dom['results-overlay'].hidden = true; dom.toast.hidden = true; dom['wrong-way'].hidden = true;
-    dom.countdown.hidden = false; dom.countdown.querySelector('span').textContent = 'READY TO RACE'; dom.countdown.querySelector('p').textContent = '按住 ↑ 或 W，准备出发';
+    dom.countdown.hidden = false; dom.countdown.querySelector('span').textContent = 'READY TO RACE'; dom.countdown.querySelector('p').textContent = usingPad() ? '按住 RT，准备出发' : '按住 ↑ 或 W，准备出发';
     dom['game-canvas'].focus({ preventScroll: true }); world.resize(); updateHud();
   }
   function returnMenu() {
-    keys.clear(); preview = true; accumulator = 0; finishAudioUntil = 0; audio.silence();
+    keys.clear(); KartGamepad.resetEdges(); preview = true; accumulator = 0; finishAudioUntil = 0; audio.silence();
     document.body.classList.remove('racing');
     ['race-hud', 'pause-overlay', 'results-overlay', 'countdown', 'toast', 'wrong-way'].forEach(id => dom[id].hidden = true);
     dom['boost-vignette'].classList.remove('active');
@@ -125,7 +145,7 @@
   }
   function resumeRace() {
     if (!race || race.state !== 'paused' || !dom['guide-overlay'].hidden) return;
-    void audio.unlock(); race.resume(); keys.clear(); accumulator = 0;
+    void audio.unlock(); race.resume(); keys.clear(); KartGamepad.resetEdges(); accumulator = 0;
     dom['pause-overlay'].hidden = true; dom.countdown.hidden = race.state !== 'countdown';
     dom['game-canvas'].focus({ preventScroll: true });
   }
@@ -173,7 +193,7 @@
       slot.title = item ? ITEM_LABELS[item] : '空';
     });
     dom['charge-bar'].style.width = `${p.nitro === 2 ? 100 : p.charge}%`;
-    dom['charge-label'].textContent = p.nitro === 2 ? '氮气已满 · 空格释放' : p.drift ? `漂移集气 ${Math.floor(p.charge)}%` : '按住 Shift 转弯 · 漂移集气';
+    dom['charge-label'].textContent = p.nitro === 2 ? (usingPad() ? '氮气已满 · 按 B 释放' : '氮气已满 · 空格释放') : p.drift ? `漂移集气 ${Math.floor(p.charge)}%` : (usingPad() ? '按住 A/LB 转向 · 漂移集气' : '按住 Shift 转弯 · 漂移集气');
     const driftActive = race.state === 'racing' && p.drift;
     const justCharged = race.state === 'racing' && race.elapsed < driftReadyUntil;
     nitroPanel.classList.toggle('drifting', driftActive);
@@ -181,9 +201,9 @@
     nitroPanel.classList.toggle('charge-ready', justCharged);
     driftFeedback.classList.toggle('active', driftActive || justCharged);
     driftFeedback.querySelector('strong').textContent = justCharged ? 'NITRO READY' : 'DRIFT';
-    driftFeedback.querySelector('span').textContent = justCharged ? '氮气就绪 · 空格释放' : `持续 ${p.driftTime.toFixed(1)}s`;
+    driftFeedback.querySelector('span').textContent = justCharged ? (usingPad() ? '氮气就绪 · 按 B 释放' : '氮气就绪 · 空格释放') : `持续 ${p.driftTime.toFixed(1)}s`;
     dom['boost-vignette'].classList.toggle('active', p.boost > 0 && race.state === 'racing');
-    dom['wrong-way'].textContent = p.missedGate ? '漏过检查点，按 R 回到赛道' : '↶ 逆行啦！请掉头返回赛道';
+    dom['wrong-way'].textContent = p.missedGate ? (usingPad() ? '漏过检查点，按 Y 回到赛道' : '漏过检查点，按 R 回到赛道') : '↶ 逆行啦！请掉头返回赛道';
     dom['wrong-way'].hidden = (!p.missedGate && p.wrongWay < 1.1) || race.state !== 'racing';
     const order = standings.map(c => c.id + (c.finishTime !== null ? 'f' : '')).join(',');
     if (order !== lastRankOrder) {
@@ -210,7 +230,7 @@
       if (event.id !== undefined && event.id !== 0) continue;
       audio.event(event.type === 'itemUse' ? 'item-' + event.item : event.type);
       if (event.type === 'go') { dom.countdown.querySelector('strong').textContent = 'GO!'; dom.countdown.querySelector('span').textContent = 'MAKE IT A GOOD RIDE'; dom.countdown.querySelector('p').textContent = '向着下一阵风出发'; goUntil = performance.now() + 900; }
-      if (event.type === 'charged') { world.driftBurst(); driftReadyUntil = race.elapsed + 0.85; toast('✦ 氮气就绪！按空格，全速出发'); }
+      if (event.type === 'charged') { world.driftBurst(); driftReadyUntil = race.elapsed + 0.85; toast(usingPad() ? '✦ 氮气就绪！按 B，全速出发' : '✦ 氮气就绪！按空格，全速出发'); }
       if (event.type === 'boost') toast('N₂O  氮气加速！', 950);
       if (event.type === 'lap') toast(event.lap === 3 ? '最后一圈！把快乐开到全速' : `第 ${event.lap} 圈，继续加油！`, 2000);
       if (event.type === 'reset') { world.cameraReady = false; world.resetDriftEffects(); driftReadyUntil = 0; toast('已回到赛道，重新出发', 1500); }
@@ -221,7 +241,12 @@
       if (event.type === 'finish') { finishAudioUntil = performance.now() + 1300; showResults(); }
     }
   }
-  function input() {
+  function input(padState) {
+    if (usingPad()) {
+      // Pad dropped mid-race: fall back to neutral input, same as releasing everything.
+      if (!padState) return { throttle: 0, brake: false, steer: 0, drift: false };
+      return { throttle: padState.throttle, brake: padState.brake, steer: padState.steer, drift: padState.drift };
+    }
     const left = keys.has('ArrowLeft') || keys.has('KeyA');
     const right = keys.has('ArrowRight') || keys.has('KeyD');
     return {
@@ -232,13 +257,24 @@
       drift: keys.has('ShiftLeft') || keys.has('ShiftRight')
     };
   }
+  // Edge-triggered pad actions share the keyboard code paths exactly.
+  function handleGamepadActions(padState) {
+    if (!padState) return;
+    if (padState.pressed.has('pause')) togglePauseOrCloseGuide();
+    if (preview || activeModal() || !race) return;
+    if (padState.pressed.has('nitro')) tryNitro();
+    if (padState.pressed.has('item')) tryItem();
+    if (padState.pressed.has('reset')) race.resetCar();
+  }
   function frame(now) {
     const dt = Math.min(0.1, previousFrame ? (now - previousFrame) / 1000 : 1 / 60); previousFrame = now;
     if (race && world) {
+      const padState = usingPad() ? KartGamepad.poll() : null;
+      handleGamepadActions(padState);
       if (!preview) {
         if (race.state === 'racing' || race.state === 'countdown') {
           accumulator += dt;
-          while (accumulator >= 1 / 60) { race.step(1 / 60, input()); accumulator -= 1 / 60; }
+          while (accumulator >= 1 / 60) { race.step(1 / 60, input(padState)); accumulator -= 1 / 60; }
           handleEvents();
         } else accumulator = 0;
         hudTimer += dt;
@@ -270,9 +306,18 @@
     dom['start-button'].disabled = true; audio.silence();
     document.querySelectorAll('.track-card').forEach(button => { button.disabled = true; });
   }
+  // Action helpers shared by keyboard keydown and gamepad edge actions.
+  function activeModal() { return !dom['guide-overlay'].hidden ? dom['guide-overlay'] : !dom['results-overlay'].hidden ? dom['results-overlay'] : !dom['pause-overlay'].hidden ? dom['pause-overlay'] : null; }
+  function togglePauseOrCloseGuide() {
+    if (!dom['guide-overlay'].hidden) closeGuide();
+    else if (race && race.state === 'paused') resumeRace();
+    else pauseRace();
+  }
+  function tryNitro() { if (!race.useNitro() && race.state === 'racing') toast(race.player.boost > 0 ? '正在加速，稍等一下' : usingPad() ? '先按住 A/LB 转向漂移，集满氮气' : '先按住 Shift 转向漂移，集满氮气', 1800); }
+  function tryItem() { if (!race.useItem() && race.state === 'racing') toast('道具栏是空的，去撞赛道上的问号箱', 1800); }
   document.addEventListener('keydown', event => {
     // Keep keyboard focus inside the topmost modal, including Shift+Tab.
-    const modal = !dom['guide-overlay'].hidden ? dom['guide-overlay'] : !dom['results-overlay'].hidden ? dom['results-overlay'] : !dom['pause-overlay'].hidden ? dom['pause-overlay'] : null;
+    const modal = activeModal();
     if (modal && event.code === 'Tab') {
       const focusable = [...modal.querySelectorAll('button:not([disabled]),a[href],[tabindex="0"]')];
       if (!focusable.length) return;
@@ -282,16 +327,16 @@
     }
     if (event.code === 'Escape') {
       event.preventDefault(); if (event.repeat) return;
-      if (!dom['guide-overlay'].hidden) closeGuide();
-      else if (race && race.state === 'paused') resumeRace();
-      else pauseRace();
+      togglePauseOrCloseGuide();
       return;
     }
     if (preview || modal || !race) return;
     if (gameKeys.has(event.code)) event.preventDefault();
     keys.add(event.code);
-    if (!event.repeat && event.code === 'Space') { if (!race.useNitro() && race.state === 'racing') toast(race.player.boost > 0 ? '正在加速，稍等一下' : '先按住 Shift 转向漂移，集满氮气', 1800); }
-    if (!event.repeat && (event.code === 'ControlLeft' || event.code === 'ControlRight')) { if (!race.useItem() && race.state === 'racing') toast('道具栏是空的，去撞赛道上的问号箱', 1800); }
+    // In gamepad mode the pad owns driving actions; keys stay recorded but unused.
+    if (usingPad()) return;
+    if (!event.repeat && event.code === 'Space') tryNitro();
+    if (!event.repeat && (event.code === 'ControlLeft' || event.code === 'ControlRight')) tryItem();
     if (!event.repeat && event.code === 'KeyR') race.resetCar();
   });
   document.addEventListener('keyup', event => { keys.delete(event.code); if (!preview && gameKeys.has(event.code)) event.preventDefault(); });
@@ -315,8 +360,19 @@
   });
   document.addEventListener('fullscreenchange', () => { $('fullscreen-button').setAttribute('aria-label', document.fullscreenElement ? '退出全屏' : '全屏游戏'); });
   document.querySelectorAll('.color-choice').forEach(button => button.addEventListener('click', () => { if (!preview) return; color = button.dataset.color; if (race) race.player.color = color; if (world) world.setColor(color); updateSelection(); persist(); }));
-  document.querySelectorAll('.difficulty-choice').forEach(button => button.addEventListener('click', () => selectDifficulty(button.dataset.difficulty)));
-  buildTrackButtons(); updateSelection(); updateSoundButton();
+  document.querySelectorAll('.difficulty-choice:not(.control-choice)').forEach(button => button.addEventListener('click', () => selectDifficulty(button.dataset.difficulty)));
+  document.querySelectorAll('.control-choice').forEach(button => button.addEventListener('click', () => selectControlMode(button.dataset.control)));
+  KartGamepad.setEnabled(usingPad());
+  KartGamepad.onConnect(() => {
+    updateGamepadStatus();
+    const label = KartGamepad.label();
+    toast(`🎮 手柄已连接${label ? '：' + label.slice(0, 24) : ''}`, 2500);
+  });
+  KartGamepad.onDisconnect(() => {
+    updateGamepadStatus();
+    if (usingPad()) { pauseRace(); toast('手柄已断开，已为你暂停', 2500); }
+  });
+  buildTrackButtons(); updateSelection(); updateSoundButton(); updateControlUI();
   try {
     if (!globalThis.KartWorld) throw new Error('引擎文件未加载，请保留 vendor 文件夹，并使用解压后的完整游戏文件夹打开 index.html。');
     world = new KartWorld(dom['game-canvas']); selectTrack(selectedIndex); dom.loading.hidden = true; dom['start-button'].disabled = false;
