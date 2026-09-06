@@ -12,13 +12,25 @@
   const saved = getSaved();
   let sound = saved.sound !== false, color = ['#f17b46', '#3fafa7', '#8596d3'].includes(saved.color) ? saved.color : '#f17b46';
   let selectedIndex = Math.max(0, KartTracks.findIndex(t => t.id === saved.track));
+  const DIFFICULTY_LABELS = { easy: '轻松', normal: '标准', master: '大师' };
+  let difficulty = Object.hasOwn(DIFFICULTY_LABELS, saved.difficulty) ? saved.difficulty : 'normal';
+  // Records are scoped per track AND difficulty: `coast:master`. Legacy v1
+  // records keyed by plain track id are kept and treated as normal-tier bests.
   const records = Object.create(null);
-  for (const t of KartTracks) {
-    const value = saved.records && saved.records[t.id];
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 1000000) records[t.id] = value;
+  if (saved.records && typeof saved.records === 'object') {
+    for (const [key, value] of Object.entries(saved.records)) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value >= 1000000) continue;
+      const sep = key.lastIndexOf(':');
+      const trackId = sep === -1 ? key : key.slice(0, sep), tier = sep === -1 ? 'normal' : key.slice(sep + 1);
+      if (KartTracks.some(t => t.id === trackId) && Object.hasOwn(DIFFICULTY_LABELS, tier)) {
+        const scoped = `${trackId}:${tier}`;
+        records[scoped] = Math.min(records[scoped] ?? Infinity, value);
+      }
+    }
   }
+  const recordKey = trackId => `${trackId}:${difficulty}`;
   function persist() {
-    try { localStorage.setItem('breeze-kart-v1', JSON.stringify({ sound, color, track: tracks[selectedIndex].id, records })); } catch { /* Private browsing or blocked storage does not prevent racing. */ }
+    try { localStorage.setItem('breeze-kart-v1', JSON.stringify({ sound, color, track: tracks[selectedIndex].id, difficulty, records })); } catch { /* Private browsing or blocked storage does not prevent racing. */ }
   }
   const tracks = KartTracks.map(C.buildTrack), audio = new KartAudio(sound);
   let world = null, race = null, preview = true, accumulator = 0, previousFrame = 0, hudTimer = 0;
@@ -73,19 +85,26 @@
     $('preview-description').textContent = track.description;
     $('preview-number').firstChild.textContent = String(selectedIndex + 1).padStart(2, '0');
     dom['map-title'].textContent = track.name;
-    $('best-time').textContent = records[track.id] ? `个人最佳 ${C.formatTime(records[track.id])}` : '新的赛道，等你留下纪录';
+    const best = records[recordKey(track.id)];
+    $('best-time').textContent = best ? `个人最佳（${DIFFICULTY_LABELS[difficulty]}） ${C.formatTime(best)}` : '新的赛道，等你留下纪录';
     document.querySelectorAll('.color-choice').forEach(button => { button.classList.toggle('selected', button.dataset.color === color); button.setAttribute('aria-pressed', String(button.dataset.color === color)); });
+    document.querySelectorAll('.difficulty-choice').forEach(button => { button.classList.toggle('selected', button.dataset.difficulty === difficulty); button.setAttribute('aria-pressed', String(button.dataset.difficulty === difficulty)); });
   }
   function selectTrack(index) {
-    selectedIndex = index; race = new C.Race(tracks[index], color); resultShown = false;
+    selectedIndex = index; race = new C.Race(tracks[index], color, Math.random, difficulty); resultShown = false;
     updateSelection(); world.load(tracks[index], race); persist();
+  }
+  // Difficulty applies to the next race; the menu preview race rebuilds instantly.
+  function selectDifficulty(tier) {
+    if (!preview || tier === difficulty || !Object.hasOwn(DIFFICULTY_LABELS, tier)) return;
+    difficulty = tier; selectTrack(selectedIndex);
   }
   function toast(message, duration = 2200) { dom.toast.textContent = message; dom.toast.hidden = false; toastUntil = performance.now() + duration; }
   function startRace() {
     if (!world || dom['guide-overlay'].hidden === false) return;
     void audio.unlock();
     keys.clear(); preview = false; resultShown = false; accumulator = 0; shownCountdown = -1; lastRankOrder = ''; finishAudioUntil = 0; goUntil = 0; driftReadyUntil = 0;
-    race = new C.Race(tracks[selectedIndex], color); world.load(tracks[selectedIndex], race);
+    race = new C.Race(tracks[selectedIndex], color, Math.random, difficulty); world.load(tracks[selectedIndex], race);
     race.start();
     document.body.classList.add('racing');
     dom['race-hud'].hidden = false; dom['pause-overlay'].hidden = true; dom['results-overlay'].hidden = true; dom.toast.hidden = true; dom['wrong-way'].hidden = true;
@@ -113,13 +132,13 @@
   function showResults() {
     if (resultShown) return;
     resultShown = true; keys.clear(); const p = race.player, track = tracks[selectedIndex];
-    const newRecord = !records[track.id] || p.finishTime < records[track.id];
-    if (newRecord) { records[track.id] = p.finishTime; persist(); }
+    const newRecord = !records[recordKey(track.id)] || p.finishTime < records[recordKey(track.id)];
+    if (newRecord) { records[recordKey(track.id)] = p.finishTime; persist(); }
     $('results-title').textContent = p.finishPlace === 1 ? '冠军，非你莫属！' : '漂亮完赛！';
     $('result-subtitle').textContent = `${track.name} · ${p.finishPlace <= 3 ? '这趟兜风，值得庆祝。' : '下一个弯，继续超越。'}`;
     $('result-place').firstChild.textContent = p.finishPlace;
     $('result-time').textContent = C.formatTime(p.finishTime);
-    $('record-label').textContent = newRecord ? '✦ 新的个人最佳纪录！' : `个人最佳 ${C.formatTime(records[track.id])}`;
+    $('record-label').textContent = newRecord ? `✦ 新的个人最佳纪录（${DIFFICULTY_LABELS[difficulty]}）！` : `个人最佳（${DIFFICULTY_LABELS[difficulty]}） ${C.formatTime(records[recordKey(track.id)])}`;
     $('result-laps').replaceChildren();
     p.lapTimes.forEach((time, i) => { const li = document.createElement('li'), span = document.createElement('span'), strong = document.createElement('strong'); span.textContent = `第 ${i + 1} 圈`; strong.textContent = C.formatTime(time); li.append(span, strong); $('result-laps').append(li); });
     dom['results-overlay'].hidden = false; dom.countdown.hidden = true; dom.toast.hidden = true;
@@ -296,6 +315,7 @@
   });
   document.addEventListener('fullscreenchange', () => { $('fullscreen-button').setAttribute('aria-label', document.fullscreenElement ? '退出全屏' : '全屏游戏'); });
   document.querySelectorAll('.color-choice').forEach(button => button.addEventListener('click', () => { if (!preview) return; color = button.dataset.color; if (race) race.player.color = color; if (world) world.setColor(color); updateSelection(); persist(); }));
+  document.querySelectorAll('.difficulty-choice').forEach(button => button.addEventListener('click', () => selectDifficulty(button.dataset.difficulty)));
   buildTrackButtons(); updateSelection(); updateSoundButton();
   try {
     if (!globalThis.KartWorld) throw new Error('引擎文件未加载，请保留 vendor 文件夹，并使用解压后的完整游戏文件夹打开 index.html。');
@@ -307,7 +327,7 @@
   }
   // Read-only diagnostics for QA. No test-only race controls are shipped to players.
   Object.defineProperty(window, '__kart', { value: Object.freeze({
-    snapshot: () => race ? { state: race.state, preview, track: race.track.id, elapsed: race.elapsed, countdown: race.countdown,
+    snapshot: () => race ? { state: race.state, preview, track: race.track.id, difficulty: race.difficultyKey, elapsed: race.elapsed, countdown: race.countdown,
       player: { ...race.player, lapTimes: [...race.player.lapTimes], items: [...race.player.items] }, standings: race.standings().map(c => ({ id: c.id, lap: c.lap, nextGate: c.nextGate, finishTime: c.finishTime })),
       boxes: race.boxes.filter(b => b.respawn <= 0).length, hazards: race.hazards.length, missiles: race.missiles.length,
       render: world ? world.stats() : null, audio: { enabled: sound, available: audio.available, state: audio.context?.state || 'locked' } } : null

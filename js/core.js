@@ -78,8 +78,18 @@
     }
     return boxes;
   }
+  // Difficulty tiers: normal mirrors the original constants exactly. AI pace and
+  // item aggression scale per tier; wall/offroad/reset penalties only bite the
+  // player in practice (AI reset at half+2, before ever touching a wall).
+  const DIFFICULTY = {
+    easy:   { paceBase: 0.76, paceStep: 0.017, aiTop: 41, itemCooldown: 1.15, shieldFire: 0.03, bananaFire: 0.05, wallKeep: 0.58, offroadTop: 21, resetCooldown: 2.0 },
+    normal: { paceBase: 0.83, paceStep: 0.021, aiTop: 41, itemCooldown: 0.9,  shieldFire: 0.05, bananaFire: 0.08, wallKeep: 0.52, offroadTop: 19, resetCooldown: 2.2 },
+    master: { paceBase: 0.90, paceStep: 0.022, aiTop: 41, itemCooldown: 0.55, shieldFire: 0.10, bananaFire: 0.15, wallKeep: 0.44, offroadTop: 16, resetCooldown: 2.6 },
+  };
   class Race {
-    constructor(track, color = COLORS[0], rng = Math.random) {
+    constructor(track, color = COLORS[0], rng = Math.random, difficulty = 'normal') {
+      this.difficultyKey = Object.hasOwn(DIFFICULTY, difficulty) ? difficulty : 'normal';
+      this.difficulty = DIFFICULTY[this.difficultyKey];
       this.track = track;
       this.state = 'ready'; this.elapsed = 0; this.countdown = 3.4; this.laps = 3;
       this.events = []; this.finishedCount = 0; this.rand = rng;
@@ -94,7 +104,7 @@
           finishTime: null, finishPlace: null, lapTimes: [], lapStart: 0, bump: 0,
           resetCooldown: 0, wrongWay: 0, missedGate: false, lastSafeProgress: progress,
           items: [], shield: 0, stun: 0, slip: 0, slipDir: 1, bubble: 0, magnet: 0, magnetTarget: -1, zap: 0, ufo: 0, aiItemCooldown: 0,
-          aiLane: (id % 3 - 1) * 2.2, aiPace: 0.83 + id * 0.021 };
+          aiLane: (id % 3 - 1) * 2.2, aiPace: this.difficulty.paceBase + id * this.difficulty.paceStep };
       });
     }
     get player() { return this.cars[0]; }
@@ -165,15 +175,15 @@
     // Deliberately simple triggers; a cooldown keeps item spam in check.
     aiItems(car) {
       if (car.aiItemCooldown > 0 || !car.items.length) return;
-      car.aiItemCooldown = 0.9;
+      car.aiItemCooldown = this.difficulty.itemCooldown;
       const item = car.items[0];
       const deltas = this.cars.filter(c => c !== car && c.finishTime === null).map(c => c.progress - car.progress);
       const nearestAhead = Math.min(...deltas.filter(d => d > 0)), nearestBehind = Math.max(...deltas.filter(d => d < 0));
       if (item === 'missile' && nearestAhead < 110) this.useItem(car);
       else if (item === 'water' && nearestAhead > 25 && nearestAhead < 75) this.useItem(car);
       else if (item === 'magnet' && nearestAhead < 130) this.useItem(car);
-      else if (item === 'shield' && (this.missiles.some(m => m.target === car.id) || this.rand() < 0.05)) this.useItem(car);
-      else if (item === 'banana' && ((nearestBehind > -25 && nearestBehind < -2) || this.rand() < 0.08)) this.useItem(car);
+      else if (item === 'shield' && (this.missiles.some(m => m.target === car.id) || this.rand() < this.difficulty.shieldFire)) this.useItem(car);
+      else if (item === 'banana' && ((nearestBehind > -25 && nearestBehind < -2) || this.rand() < this.difficulty.bananaFire)) this.useItem(car);
       else if (item === 'lightning') this.useItem(car);
       else if (item === 'ufo') this.useItem(car);
       else if (item === 'nitro' && car.nitro < 2 && Math.abs(car.steer) < 0.15 && car.speed > 25) this.useItem(car);
@@ -228,7 +238,7 @@
       const progress = Math.min(car.lastSafeProgress, gate + this.track.length / this.track.gateCount - 4);
       const p = sample(this.track, progress);
       Object.assign(car, { x: p.x, z: p.z, heading: p.heading, velocityHeading: p.heading, speed: 0, drift: false,
-        progress, lastS: p.s, lateral: 0, boost: 0, resetCooldown: 2.2, wrongWay: 0, missedGate: false,
+        progress, lastS: p.s, lateral: 0, boost: 0, resetCooldown: this.difficulty.resetCooldown, wrongWay: 0, missedGate: false,
         stun: 0, slip: 0, bubble: 0, magnet: 0, magnetTarget: -1, zap: 0, ufo: 0 });
       this.events.push({ type: 'reset', id: car.id });
       return true;
@@ -239,7 +249,7 @@
       const later = sample(this.track, car.progress + 34);
       const delta = angleDelta(Math.atan2(ahead.x - car.x, ahead.z - car.z), car.heading);
       const curve = Math.abs(angleDelta(later.heading, here.heading));
-      const target = clamp(43 - curve * 22, 19, 41) * car.aiPace;
+      const target = clamp(43 - curve * 22, 19, this.difficulty.aiTop) * car.aiPace;
       return { throttle: car.speed < target ? 1 : 0, brake: car.speed > target + 2, steer: clamp(delta * 2.2, -1, 1), drift: curve > 0.33 && curve < 1.35 && car.speed > 21 && Math.abs(delta) < 0.7 };
     }
     step(dt, input = {}) {
@@ -280,7 +290,7 @@
       car.steer = approach(car.steer, car.slip > 0 ? car.slipDir : desiredSteer, dt, car.id === 0 ? 18 : 10);
       car.drift = Boolean(input.drift && car.speed > 14 && Math.abs(car.steer) > 0.16 && Math.abs(car.lateral) < this.track.width / 2);
       const offroad = Math.abs(car.lateral) > this.track.width / 2;
-      const top = car.bubble > 0 ? 12 : offroad ? 19 : car.boost > 0 ? 61 : car.magnet > 0 ? 54 : 42;
+      const top = car.bubble > 0 ? 12 : offroad ? this.difficulty.offroadTop : car.boost > 0 ? 61 : car.magnet > 0 ? 54 : 42;
       const throttle = clamp(Number(input.throttle) || 0, 0, 1);
       if (throttle && car.stun <= 0 && car.bubble <= 0) car.speed += (car.boost > 0 ? 34 : car.magnet > 0 ? 30 : 20) * throttle * dt;
       else car.speed = approach(car.speed, 0, dt, 0.36);
@@ -343,7 +353,7 @@
         const pos = sample(this.track, p.s, Math.sign(p.lateral) * (half + 3.25));
         car.x = pos.x; car.z = pos.z;
         if (car.bump <= 0) {
-          car.speed *= 0.52; car.bump = 0.7;
+          car.speed *= this.difficulty.wallKeep; car.bump = 0.7;
           this.events.push({ type: 'bump', id: car.id });
         }
         car.velocityHeading += angleDelta(p.heading, car.velocityHeading) * 0.24;
@@ -390,7 +400,7 @@
     const ms = Math.floor(Math.max(0, seconds) * 1000);
     return `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
   }
-  const api = { Race, buildTrack, buildBoxes, sample, project, clamp, lerp, mod, angleDelta, approach, formatTime, COLORS, ITEMS };
+  const api = { Race, buildTrack, buildBoxes, sample, project, clamp, lerp, mod, angleDelta, approach, formatTime, COLORS, ITEMS, DIFFICULTY };
   root.KartCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
