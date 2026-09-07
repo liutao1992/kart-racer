@@ -62,29 +62,24 @@ test('drift entry kicks the nose instantly (hop kick)', () => {
   race.drive(car, { throttle: 1, drift: true, steer: 1 }, dt);
   assert.equal(car.drift, true);
   const gained = C.angleDelta(car.heading, headingBefore);
-  // One normal turning frame is ~0.015 rad at this speed; the kick adds 0.055.
+  // One normal turning frame is ~0.015 rad at this speed; the kick adds 0.045.
   assert.ok(gained > 0.04, `entry frame should kick the nose, got ${gained}`);
 });
-test('mid-drift steering is relative to the locked drift direction', () => {
-  // KartRider/QQ Speed semantics: same direction deepens the slide, releasing
-  // the wheel coasts on inertia, counter-steer pulls the nose in WITHOUT
-  // snapping the heading backward.
+test('drift arc responds to steering and counter-steer rotates the nose back', () => {
   const run = (after) => {
     const race = racing(), car = race.player;
     car.speed = 30;
     for (let i = 0; i < 60; i++) race.drive(car, { throttle: 1, drift: true, steer: 1 }, dt);
-    const h0 = car.heading;
-    car.steer = after; // pin the wheel so the measurement skips the ramp
-    for (let i = 0; i < 18; i++) race.drive(car, { throttle: 1, drift: true, steer: after }, dt);
-    assert.equal(car.drift, true);
-    return { rotated: C.angleDelta(car.heading, h0), gap: Math.abs(C.angleDelta(car.velocityHeading, car.heading)) };
+    const h0 = car.heading, charge = car.charge;
+    for (let i = 0; i < 12; i++) race.drive(car, { throttle: 1, drift: true, steer: after }, dt);
+    return { car, rotated: C.angleDelta(car.heading, h0), charge, gap: Math.abs(C.angleDelta(car.velocityHeading, car.heading)) };
   };
   const same = run(1), half = run(0.5), coast = run(0), counter = run(-1);
-  assert.ok(same.rotated > half.rotated && half.rotated > coast.rotated && coast.rotated > 0.05,
-    `turn rate should scale same > half > coast: ${same.rotated} ${half.rotated} ${coast.rotated}`);
-  assert.ok(Math.abs(counter.rotated) < 0.01, `counter-steer stops the turn, never reverses: ${counter.rotated}`);
-  assert.ok(same.gap > half.gap && half.gap > coast.gap && coast.gap > counter.gap,
-    `slip should shrink same > half > coast > counter: ${same.gap} ${half.gap} ${coast.gap} ${counter.gap}`);
+  assert.ok(same.rotated > half.rotated && half.rotated > coast.rotated && coast.rotated > 0);
+  assert.ok(counter.rotated < -0.08, `counter-steer must pull the nose back: ${counter.rotated}`);
+  assert.ok(counter.gap < 0.04);
+  assert.equal(counter.car.drift, false);
+  assert.equal(counter.car.charge, counter.charge, 'recovery cannot farm charge');
 });
 test('releasing the wheel mid-drift keeps the slide alive (drift hold / 拖漂)', () => {
   const race = racing(), car = race.player;
@@ -591,4 +586,138 @@ test('difficulty: hell AI carry touge-master corner speed past legend (volcano)'
   };
   const legend = best('legend'), hell = best('hell');
   assert.ok(hell < legend - 2, `hell fastest ${hell.toFixed(1)} should beat legend fastest ${legend.toFixed(1)}`);
+});
+
+function driftRun(frames = 45, steering = 1, step = dt) {
+  const race = racing(), car = race.player;
+  Object.assign(car, { speed: 32, lateral: 0 });
+  for (let i = 0; i < frames; i++) race.drive(car, { throttle: 1, drift: true, steer: steering }, step);
+  return { race, car };
+}
+
+test('a short keyboard drift stays shallow while a held drift builds depth', () => {
+  const short = driftRun(7), long = driftRun(60);
+  const gap = car => Math.abs(C.angleDelta(car.heading, car.velocityHeading));
+  assert.ok(gap(short.car) < 0.16);
+  assert.ok(gap(long.car) > gap(short.car) + 0.15);
+  assert.ok(gap(long.car) < 0.4, 'held drift should not grow into an uncontrolled slide');
+});
+
+test('90-degree and U-turn drift arcs recover promptly in both directions', () => {
+  for (const angle of [Math.PI / 2, Math.PI]) for (const direction of [-1, 1]) {
+    const { race, car } = driftRun(0), start = car.heading;
+    let frames = 0;
+    while ((car.heading - start) * direction < angle && frames++ < 300) {
+      race.drive(car, { throttle: 1, drift: true, steer: direction }, dt);
+    }
+    assert.ok(frames < 300, 'turn must be achievable without stopping');
+    const entry = car.heading;
+    for (let i = 0; i < 8; i++) race.drive(car, { throttle: 1, drift: true, steer: -direction }, dt);
+    assert.ok((car.heading - entry) * direction < -0.08, 'nose must recover in the opposite direction');
+    assert.ok(Math.abs(C.angleDelta(car.heading, car.velocityHeading)) < 0.04);
+    assert.ok(car.speed > 28);
+  }
+});
+
+test('S-turns can re-enter opposite drift after releasing the drift key', () => {
+  const { race, car } = driftRun(), before = car.heading;
+  for (let i = 0; i < 12; i++) race.drive(car, { throttle: 1, drift: true, steer: -1 }, dt);
+  assert.equal(car.drift, false, 'held counter-steer must not create an opposite drift');
+  assert.ok(car.heading < before);
+  race.drive(car, { throttle: 1, drift: false, steer: -1 }, dt);
+  race.drive(car, { throttle: 1, drift: true, steer: -1 }, dt);
+  assert.equal(car.drift, true);
+  assert.equal(car.driftDir, -1);
+  assert.ok(car.driftTime < 0.04, 'new drift starts shallow');
+});
+
+test('clean drift exit earns one automatic mini boost, independent of nitro', () => {
+  const { race, car } = driftRun();
+  car.nitro = 1;
+  const speed = car.speed;
+  for (let i = 0; i < 30; i++) race.drive(car, { throttle: 1 }, dt);
+  assert.equal(race.drainEvents().filter(e => e.type === 'miniBoost').length, 1);
+  assert.ok(car.miniBoost > 0);
+  assert.ok(car.speed > speed + 3);
+  assert.equal(car.nitro, 1);
+  assert.equal(race.useNitro(), true, 'mini boost must not block bottled nitro');
+  for (let i = 0; i < 60; i++) race.drive(car, { throttle: 1 }, dt);
+  assert.equal(car.miniBoost, 0);
+  assert.equal(race.drainEvents().filter(e => e.type === 'miniBoost').length, 0);
+});
+
+test('tiny drift taps and indefinitely held counter-steer cannot farm rewards', () => {
+  const tiny = driftRun(5);
+  for (let i = 0; i < 30; i++) tiny.race.drive(tiny.car, { throttle: 1 }, dt);
+  assert.equal(tiny.race.drainEvents().filter(e => e.type === 'miniBoost').length, 0);
+  const { race, car } = driftRun(), charge = car.charge;
+  for (let i = 0; i < 180; i++) race.drive(car, { throttle: 1, drift: true, steer: -1 }, dt);
+  assert.equal(car.charge, charge);
+  assert.equal(car.drift, false);
+  assert.equal(race.drainEvents().filter(e => e.type === 'miniBoost').length, 1);
+});
+
+test('mini boost requires throttle and expires if the driver does not accelerate', () => {
+  const { race, car } = driftRun();
+  for (let i = 0; i < 65; i++) race.drive(car, {}, dt);
+  assert.equal(car.miniReady, 0);
+  race.drive(car, { throttle: 1 }, dt);
+  assert.equal(car.miniBoost, 0);
+  assert.equal(race.drainEvents().filter(e => e.type === 'miniBoost').length, 0);
+});
+
+test('damage, offroad, contact and reset cancel pending drift rewards', () => {
+  for (const action of ['missile', 'banana', 'water', 'lightning', 'ufo', 'offroad', 'wall', 'contact', 'reset']) {
+    const { race, car } = driftRun();
+    race.drive(car, {}, dt);
+    assert.ok(car.miniReady > 0);
+    if (action === 'reset') race.resetCar();
+    else if (action === 'offroad') car.lateral = race.track.width;
+    else if (action === 'wall') { positionCar(race, 20, race.track.width); race.updateProgress(car, dt); }
+    else if (action === 'contact') { Object.assign(race.cars[1], { x: car.x + 1, z: car.z }); race.collisions(); }
+    else race.applyHit(car, action);
+    race.drive(car, { throttle: 1 }, dt);
+    assert.equal(car.miniReady, 0, action);
+    assert.equal(car.miniBoost, 0, action);
+  }
+});
+
+test('recovery and mini boost remain consistent at 30, 60 and 120 Hz', () => {
+  const runs = [30, 60, 120].map(hz => {
+    const { race, car } = driftRun(hz, 1, 1 / hz), before = car.heading;
+    for (let i = 0; i < hz / 5; i++) race.drive(car, { throttle: 1, drift: true, steer: -1 }, 1 / hz);
+    assert.ok(car.heading < before - 0.08);
+    assert.ok(Math.abs(C.angleDelta(car.heading, car.velocityHeading)) < 0.04);
+    assert.equal(race.drainEvents().filter(e => e.type === 'miniBoost').length, 1);
+    return car.heading - before;
+  });
+  assert.ok(Math.max(...runs) - Math.min(...runs) < 0.07);
+});
+
+test('contact cancels a mini boost even when collision damage is on cooldown', () => {
+  const { race, car } = driftRun();
+  for (let i = 0; i < 12; i++) race.drive(car, { throttle: 1 }, dt);
+  assert.ok(car.miniBoost > 0);
+  Object.assign(race.cars[1], { x: car.x + 1, z: car.z, bump: 0.3 });
+  race.collisions();
+  assert.equal(car.miniBoost, 0);
+});
+
+test('a shielded hit preserves the earned mini boost opportunity', () => {
+  const { race, car } = driftRun();
+  race.drive(car, {}, dt);
+  car.shield = 3;
+  assert.equal(race.applyHit(car, 'missile'), false);
+  assert.ok(car.miniReady > 0);
+});
+
+test('exit mini boost does not lower a stronger magnet or nitro speed cap', () => {
+  for (const field of ['magnet', 'boost']) {
+    const { race, car } = driftRun(0);
+    Object.assign(car, { speed: 53, [field]: 1, miniBoost: 0.5 });
+    const reference = { ...car, miniBoost: 0 };
+    race.drive(car, { throttle: 1 }, dt);
+    race.drive(reference, { throttle: 1 }, dt);
+    assert.equal(car.speed, reference.speed, field);
+  }
 });

@@ -206,7 +206,7 @@
     dom.lap.textContent = Math.min(3, p.lap); dom['race-time'].textContent = C.formatTime(race.elapsed);
     dom['lap-time'].textContent = '本圈 ' + C.formatTime(race.elapsed - p.lapStart);
     dom.speed.textContent = Math.round(Math.abs(p.speed) * 3.6); dom['speed-bar'].style.width = `${Math.min(100, Math.abs(p.speed) / 61 * 100)}%`;
-    dom['drive-status'].textContent = race.state === 'countdown' ? '准备出发' : p.stun > 0 ? '被打晕了，稳住！' : p.bubble > 0 ? '水泡围困中…' : p.slip > 0 ? '打滑中！' : p.zap > 0 ? '触电麻痹中…' : p.ufo > 0 ? '被 UFO 拖住了！' : p.boost > 0 ? '氮气加速中 ↗' : p.drift ? '漂亮漂移 ✦' : Math.abs(p.lateral) > race.track.width / 2 ? '驶回路面，恢复速度' : p.speed < -0.5 ? '倒车中' : '享受这一路的风';
+    dom['drive-status'].textContent = race.state === 'countdown' ? '准备出发' : p.stun > 0 ? '被打晕了，稳住！' : p.bubble > 0 ? '水泡围困中…' : p.slip > 0 ? '打滑中！' : p.zap > 0 ? '触电麻痹中…' : p.ufo > 0 ? '被 UFO 拖住了！' : p.boost > 0 ? '氮气加速中 ↗' : p.miniBoost > 0 ? '出弯小喷 ↗' : p.driftPhase === 'recover' ? '拉正车头，准备出弯' : p.drift ? '漂亮漂移 ✦' : Math.abs(p.lateral) > race.track.width / 2 ? '驶回路面，恢复速度' : p.speed < -0.5 ? '倒车中' : '享受这一路的风';
     dom['nitro-1'].classList.toggle('filled', p.nitro >= 1); dom['nitro-2'].classList.toggle('filled', p.nitro >= 2);
     [dom['item-1'], dom['item-2']].forEach((slot, i) => {
       const item = p.items[i], icon = slot.querySelector('span'), text = item ? ITEM_ICONS[item] : '';
@@ -218,14 +218,15 @@
     dom['charge-bar'].style.width = `${p.nitro === 2 ? 100 : p.charge}%`;
     dom['charge-label'].textContent = p.nitro === 2 ? (usingPad() ? '氮气已满 · 按 B 释放' : '氮气已满 · 空格释放') : p.drift ? `漂移集气 ${Math.floor(p.charge)}%` : (usingPad() ? '按住 A/LB 转向 · 漂移集气' : '按住 Shift 转弯 · 漂移集气');
     const driftActive = race.state === 'racing' && p.drift;
+    const miniActive = race.state === 'racing' && p.miniBoost > 0;
     const justCharged = race.state === 'racing' && race.elapsed < driftReadyUntil;
     nitroPanel.classList.toggle('drifting', driftActive);
     nitroPanel.classList.toggle('drift-gold', p.charge >= 65 || p.nitro === 2 || justCharged);
     nitroPanel.classList.toggle('charge-ready', justCharged);
-    driftFeedback.classList.toggle('active', driftActive || justCharged);
-    driftFeedback.querySelector('strong').textContent = justCharged ? 'NITRO READY' : 'DRIFT';
-    driftFeedback.querySelector('span').textContent = justCharged ? (usingPad() ? '氮气就绪 · 按 B 释放' : '氮气就绪 · 空格释放') : `持续 ${p.driftTime.toFixed(1)}s`;
-    dom['boost-vignette'].classList.toggle('active', p.boost > 0 && race.state === 'racing');
+    driftFeedback.classList.toggle('active', driftActive || justCharged || miniActive);
+    driftFeedback.querySelector('strong').textContent = miniActive ? 'MINI BOOST' : justCharged ? 'NITRO READY' : 'DRIFT';
+    driftFeedback.querySelector('span').textContent = miniActive ? '漂亮出弯 · 小喷加速' : justCharged ? (usingPad() ? '氮气就绪 · 按 B 释放' : '氮气就绪 · 空格释放') : `持续 ${p.driftTime.toFixed(1)}s`;
+    dom['boost-vignette'].classList.toggle('active', (p.boost > 0 || p.miniBoost > 0) && race.state === 'racing');
     dom['wrong-way'].textContent = p.missedGate ? (usingPad() ? '漏过检查点，按 Y 回到赛道' : '漏过检查点，按 R 回到赛道') : '↶ 逆行啦！请掉头返回赛道';
     dom['wrong-way'].hidden = (!p.missedGate && p.wrongWay < 1.1) || race.state !== 'racing';
     const order = standings.map(c => c.id + (c.finishTime !== null ? 'f' : '')).join(',');

@@ -129,6 +129,12 @@ test('WebGL unavailable shows an actionable error without a dead start button', 
 
 test('arrows and A/D steer toward the corresponding screen side, also while drifting', async ({ page }, info) => {
   await loaded(page); await page.clock.install();
+  // Isolate input direction from random attacks and starting-grid contact.
+  await page.evaluate(() => {
+    KartCore.Race.prototype.updateItems = () => {};
+    KartCore.Race.prototype.aiItems = () => {};
+    KartCore.Race.prototype.collisions = () => {};
+  });
   // Capture the camera used for actual rendering. Expectations are in camera
   // space, independent of the game's signed steering/heading convention.
   await page.evaluate(() => {
@@ -195,6 +201,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) {
     await page.evaluate(() => {
       window.KartCore.Race.prototype.updateItems = () => {};
       window.KartCore.Race.prototype.aiItems = () => {};
+    window.KartCore.Race.prototype.collisions = () => {};
     });
     await page.locator('#start-button').click();
     // Compare GPU allocations in the same race camera, after lazy uploads.
@@ -443,4 +450,64 @@ test('difficulty selection persists and scopes records per tier', async ({ page 
   await expect(page.locator('#best-time')).toContainText('新的赛道');
   await page.reload(); await expect(page.locator('#start-button')).toBeEnabled();
   await expect(page.locator('.difficulty-choice.selected[data-difficulty]')).toHaveAttribute('data-difficulty', 'hell');
+});
+
+test('keyboard counter-steer recovers and shows one exit mini boost', async ({ page }, info) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await loaded(page);
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'));
+  // Isolate keyboard/rendering from opponent attacks and starting-grid contact;
+  // cancellation by collisions and item hits is covered by core tests.
+  await page.evaluate(() => {
+    KartCore.Race.prototype.updateItems = () => {};
+    KartCore.Race.prototype.aiItems = () => {};
+    KartCore.Race.prototype.collisions = () => {};
+  });
+  await page.locator('#start-button').click();
+  await page.keyboard.down('ArrowUp');
+  let state;
+  for (let i = 0; i < 150; i++) {
+    await page.clock.fastForward(100);
+    state = await snapshot(page);
+    if (state.state === 'racing' && state.player.speed > 24) break;
+  }
+  expect(state.player.speed).toBeGreaterThan(24);
+  const advance = async seconds => {
+    const target = (await snapshot(page)).elapsed + seconds;
+    for (let i = 0; i < 100; i++) {
+      await page.clock.fastForward(50);
+      if ((await snapshot(page)).elapsed >= target) return;
+    }
+    throw new Error('Simulation did not advance');
+  };
+  await page.keyboard.down('ArrowRight');
+  await page.keyboard.down('ShiftLeft');
+  await advance(0.38);
+  const drifting = await snapshot(page);
+  expect(drifting.player.drift).toBe(true);
+  expect(drifting.player.driftValidTime).toBeGreaterThan(0.22);
+  await page.keyboard.up('ArrowRight');
+  await page.keyboard.down('ArrowLeft');
+  await advance(0.15);
+  const recovered = await snapshot(page);
+  expect(recovered.player.heading).toBeGreaterThan(drifting.player.heading + 0.05);
+  expect(recovered.player.drift).toBe(false);
+  expect(recovered.player.miniBoost, JSON.stringify({before: drifting.player, after: recovered.player})).toBeGreaterThan(0);
+  expect(recovered.player.nitro).toBe(drifting.player.nitro);
+  await expect(page.locator('#drift-feedback strong')).toHaveText('MINI BOOST');
+  await expect(page.locator('#drive-status')).toHaveText('出弯小喷 ↗');
+  await page.screenshot({ path: info.outputPath('exit-mini-boost.png') });
+  await page.keyboard.press('Escape');
+  const paused = await snapshot(page);
+  await page.clock.fastForward(500);
+  expect((await snapshot(page)).player.miniBoost).toBe(paused.player.miniBoost);
+  await page.locator('#resume-button').click();
+  await page.keyboard.up('ArrowLeft');
+  await page.keyboard.up('ShiftLeft');
+  await page.keyboard.down('ArrowUp');
+  await advance(0.65);
+  expect((await snapshot(page)).player.miniBoost).toBe(0);
+  expect(errors).toEqual([]);
 });

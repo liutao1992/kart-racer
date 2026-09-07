@@ -25,10 +25,11 @@ function replay(C, seed, difficulty) {
   return hash.digest('hex');
 }
 if(process.env.KART_RECORD_BASELINE) {
+  if (!process.env.KART_BASELINE_SOURCE) throw new Error('Set KART_BASELINE_SOURCE to describe the intentional physics change');
   const baseline=require(path.resolve(process.env.KART_RECORD_BASELINE)),results=[];
   for(const seed of [7,19])for(const difficulty of ['easy','normal','master','legend','hell'])results.push({seed,difficulty,sha256:replay(baseline,seed,difficulty)});
-  fs.writeFileSync(fixture,JSON.stringify({source:'d55107104a50fdbc606b1b0759079da57be14572 (upstream drift improvements before typing migration)',framesPerCase:3000,results},null,2)+'\n');
+  fs.writeFileSync(fixture,JSON.stringify({source:process.env.KART_BASELINE_SOURCE,framesPerCase:3000,results},null,2)+'\n');
 } else {
   const baseline=JSON.parse(fs.readFileSync(fixture,'utf8'));
-  for(const row of baseline.results)test(`unchanged physics replay: ${row.difficulty}, seed ${row.seed}`,()=>assert.equal(replay(current,row.seed,row.difficulty),row.sha256));
+  for(const row of baseline.results)test(`physics replay baseline: ${row.difficulty}, seed ${row.seed}`,()=>assert.equal(replay(current,row.seed,row.difficulty),row.sha256));
 }

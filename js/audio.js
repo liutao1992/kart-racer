@@ -76,6 +76,7 @@
       if (type === 'reset') { this.silence(); return; }
       if (type === 'count') this.tone(520, 0.13);
       if (type === 'go') this.tone(1040, 0.4);
+      if (type === 'miniBoost') { this.tone(660, 0.09); this.tone(990, 0.16, 0.06); }
       if (type === 'charged') { this.tone(780, 0.13); this.tone(1170, 0.25, 0.1); }
       if (type === 'lap') { this.tone(660, 0.16); this.tone(880, 0.2, 0.12); }
       if (type === 'bump') this.tone(75, 0.1, 0, 'triangle');

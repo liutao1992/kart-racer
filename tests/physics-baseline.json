@@ -1,56 +1,56 @@
 {
-  "source": "d55107104a50fdbc606b1b0759079da57be14572 (upstream drift improvements before typing migration)",
+  "source": "Player drift recovery, shallow entry and automatic exit mini boost (2026-09-07)",
   "framesPerCase": 3000,
   "results": [
     {
       "seed": 7,
       "difficulty": "easy",
-      "sha256": "71237c89c0a38f047be308956d7bc889beb20c61237c8f8d1415d2b890bff52a"
+      "sha256": "d818fba475d94873273e1739d74703807e23ab11a6bd295f1ec5736634466f8c"
     },
     {
       "seed": 7,
       "difficulty": "normal",
-      "sha256": "cabd35600e2839f51fbe2822ce7eead26ff22955a7a5917be3f4c525d41cb0e2"
+      "sha256": "6d3a2414dd6f24ad835486735f98d49f19db2348a62e548b8d588a5b422696c3"
     },
     {
       "seed": 7,
       "difficulty": "master",
-      "sha256": "4d47fdafdf581417c428ab894a22206b3d6f360478cbae54cd4945745c9dd0cd"
+      "sha256": "e10f1349dbd08ddd76941ac2a96b6174472ba6b152ea89000844e3afc5503d27"
     },
     {
       "seed": 7,
       "difficulty": "legend",
-      "sha256": "81d1045058cdcfdc070daf3240939d55b3e908b253cd6402a49d9a0f30af33d4"
+      "sha256": "3196ab0f48c69d67af83626f721137c8c7aa95ae57bc2e670e1086005ff2ddb8"
     },
     {
       "seed": 7,
       "difficulty": "hell",
-      "sha256": "c2049c9bb4e5acaf2b0f5be709b096c7b9bbf475019c8154f9f7798957a6a0f3"
+      "sha256": "369c1ab19ed49f74feb6d0f7e143e5568d0a6dfa4358517d3f483398646b1045"
     },
     {
       "seed": 19,
       "difficulty": "easy",
-      "sha256": "0b8b957098770e751a611159bc39250b46f22936f76241842fc2a500cfd1ebfa"
+      "sha256": "d97b786c2d337ef62b74308d7cdc702172d93ecb7efb6f7cadae8c320278e334"
     },
     {
       "seed": 19,
       "difficulty": "normal",
-      "sha256": "dcd1beaecda7060151f849cf12b97a06d7a531d1c91a18bb303fbdc28ccdc3aa"
+      "sha256": "81f938489704ec5fe65767c751d31cf139c760594503bdfa62bcff3f4c2bf36a"
     },
     {
       "seed": 19,
       "difficulty": "master",
-      "sha256": "b255b21d7f3dedba896333b6be77400cef3d14f92ed1ed89f3946c7683e2e86e"
+      "sha256": "85f5b0f7969daee5d4d919fe6405e0e93b8c89bda66818c6de252ac56db466a4"
     },
     {
       "seed": 19,
       "difficulty": "legend",
-      "sha256": "0c479271debaa3bfce53bd62e1aee632f4c0f092f047035de33aab839b9ce4cb"
+      "sha256": "5664c79d52b75d704122b18fc796c0a8a551f66a33442928df61f10919e2bbcb"
     },
     {
       "seed": 19,
       "difficulty": "hell",
-      "sha256": "8ff4aa2f54d7c795591e4decd51d0fe5dc29b2f3d89c2613d0de84c02abb7cdb"
+      "sha256": "632cd56e7acbc949fef0efae3142b67893474c8924505d31b6438a94c53b57a5"
     }
   ]
 }

@@ -321,7 +321,7 @@
     color(model,color) {for(const key of ['paint','helmetPaint','suit']) model[key].color.set(color);}
     updatePose(model,car,dt,time,reduced,fx) {
       const running=this.world.race.state==='racing', active=running||this.world.race.state==='paused';
-      const state=active ? car : { ...car, stun:0,bubble:0,zap:0,ufo:0,slip:0,boost:0,magnet:0 };
+      const state=active ? car : { ...car, stun:0,bubble:0,zap:0,ufo:0,slip:0,boost:0,miniBoost:0,magnet:0 };
       const pose=state.stun>0?'missile':state.bubble>0?'water':state.zap>0?'lightning':state.ufo>0?'ufo':state.slip>0?'banana':'drive';
       model.pose=pose;
       const near=Math.hypot(car.x-this.world.race.player.x,car.z-this.world.race.player.z)<48;
@@ -347,7 +347,7 @@
       model.mouth.scale.y=.022*(hurt?3.2:1);model.brows.forEach((b,i)=>{b.rotation.z=hurt?(i?-.24:.24):(i?.09:-.09);b.position.y=hurt?.31:.285;});
       model.arms.forEach((arm,i)=>{arm.rotation.x=reduced?0:pose==='water'?Math.sin(time*6+i*Math.PI)*.22:pose==='lightning'?-.12:0;arm.rotation.z=reduced?0:car.steer*.12;});
       model.steering.rotation.z=car.steer*.42;
-      model.flames.forEach((f,i)=>{f.visible=state.boost>0&&active;f.scale.z=reduced?1:1+Math.sin(time*25+i)*.12;});
+      model.flames.forEach((f,i)=>{f.visible=(state.boost>0||state.miniBoost>0)&&active;f.scale.z=reduced?1:1+Math.sin(time*25+i)*.12;});
     }
     update(model,car,dt,time,reduced) {
       this.updatePose(model,car,dt,time,reduced);
