@@ -53,6 +53,67 @@ test('drift exit re-centers progressively instead of snapping', () => {
   assert.ok(car.driftBlend < 0.05);
   assert.ok(Math.abs(C.angleDelta(car.velocityHeading, car.heading)) < 0.02);
 });
+test('drift entry kicks the nose instantly (hop kick)', () => {
+  const race = racing(), car = race.player;
+  car.speed = 30;
+  // Ramp the steering in first so the entry frame isolates the kick.
+  for (let i = 0; i < 10; i++) race.drive(car, { throttle: 1, steer: 1 }, dt);
+  const headingBefore = car.heading;
+  race.drive(car, { throttle: 1, drift: true, steer: 1 }, dt);
+  assert.equal(car.drift, true);
+  const gained = C.angleDelta(car.heading, headingBefore);
+  // One normal turning frame is ~0.015 rad at this speed; the kick adds 0.055.
+  assert.ok(gained > 0.04, `entry frame should kick the nose, got ${gained}`);
+});
+test('mid-drift steering is relative to the locked drift direction', () => {
+  // KartRider/QQ Speed semantics: same direction deepens the slide, releasing
+  // the wheel coasts on inertia, counter-steer pulls the nose in WITHOUT
+  // snapping the heading backward.
+  const run = (after) => {
+    const race = racing(), car = race.player;
+    car.speed = 30;
+    for (let i = 0; i < 60; i++) race.drive(car, { throttle: 1, drift: true, steer: 1 }, dt);
+    const h0 = car.heading;
+    car.steer = after; // pin the wheel so the measurement skips the ramp
+    for (let i = 0; i < 18; i++) race.drive(car, { throttle: 1, drift: true, steer: after }, dt);
+    assert.equal(car.drift, true);
+    return { rotated: C.angleDelta(car.heading, h0), gap: Math.abs(C.angleDelta(car.velocityHeading, car.heading)) };
+  };
+  const same = run(1), half = run(0.5), coast = run(0), counter = run(-1);
+  assert.ok(same.rotated > half.rotated && half.rotated > coast.rotated && coast.rotated > 0.05,
+    `turn rate should scale same > half > coast: ${same.rotated} ${half.rotated} ${coast.rotated}`);
+  assert.ok(Math.abs(counter.rotated) < 0.01, `counter-steer stops the turn, never reverses: ${counter.rotated}`);
+  assert.ok(same.gap > half.gap && half.gap > coast.gap && coast.gap > counter.gap,
+    `slip should shrink same > half > coast > counter: ${same.gap} ${half.gap} ${coast.gap} ${counter.gap}`);
+});
+test('releasing the wheel mid-drift keeps the slide alive (drift hold / 拖漂)', () => {
+  const race = racing(), car = race.player;
+  car.speed = 30;
+  for (let i = 0; i < 60; i++) race.drive(car, { throttle: 1, drift: true, steer: 1 }, dt);
+  assert.equal(car.drift, true);
+  const h0 = car.heading;
+  // Drift key held, wheel straightened: the slide must persist ~0.35s.
+  for (let i = 0; i < 12; i++) race.drive(car, { throttle: 1, drift: true }, dt);
+  assert.equal(car.drift, true, 'drift should persist briefly after steering release');
+  assert.ok(C.angleDelta(car.heading, h0) > 0.02, 'kart keeps arcing on inertia');
+  assert.ok(car.charge > 0, 'hold still charges nitro');
+  // Once the hold window lapses the drift ends and the pull-up window opens.
+  for (let i = 0; i < 20; i++) race.drive(car, { throttle: 1, drift: true }, dt);
+  assert.equal(car.drift, false);
+  assert.ok(car.pullUp > 0);
+});
+test('releasing drift pulls the nose straight within the 0.3s window (pull-up)', () => {
+  const race = racing(), car = race.player;
+  car.speed = 30;
+  for (let i = 0; i < 60; i++) race.drive(car, { throttle: 1, drift: true, steer: 1 }, dt);
+  assert.equal(car.drift, true);
+  race.drive(car, { throttle: 1 }, dt);
+  assert.equal(car.drift, false);
+  assert.ok(car.pullUp > 0.2, `pull-up window should engage, got ${car.pullUp}`);
+  for (let i = 0; i < 17; i++) race.drive(car, { throttle: 1 }, dt);
+  const gap = Math.abs(C.angleDelta(car.velocityHeading, car.heading));
+  assert.ok(gap < 0.01, `nose should pull back fast, gap ${gap} after the 0.3s window`);
+});
 test('valid drift charges bottles, capacity is two, boost consumes one and expires', () => {
   const race = racing(), car = race.player;
   car.speed = 30;

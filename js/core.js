@@ -108,7 +108,7 @@
         const progress = -8 - Math.floor(id / 2) * 7;
         const pos = sample(track, progress, id % 2 ? 2.1 : -2.1);
         return { id, name: NAMES[id], color: id === 0 ? color : COLORS[id], x: pos.x, z: pos.z,
-          heading: pos.heading, velocityHeading: pos.heading, speed: 0, steer: 0, drift: false, driftBlend: 0,
+          heading: pos.heading, velocityHeading: pos.heading, speed: 0, steer: 0, drift: false, driftBlend: 0, pullUp: 0, driftDir: 1, driftHold: 0,
           driftTime: 0, charge: 0, nitro: 0, boost: 0, progress, nextGate: 0,
           lastS: mod(progress, track.length), lateral: id % 2 ? 2.1 : -2.1, lap: 1,
           finishTime: null, finishPlace: null, lapTimes: [], lapStart: 0, bump: 0,
@@ -255,7 +255,7 @@
       const gate = Math.max(0, car.nextGate - 1) * this.track.length / this.track.gateCount;
       const progress = Math.min(car.lastSafeProgress, gate + this.track.length / this.track.gateCount - 4);
       const p = sample(this.track, progress);
-      Object.assign(car, { x: p.x, z: p.z, heading: p.heading, velocityHeading: p.heading, speed: 0, drift: false, driftBlend: 0,
+      Object.assign(car, { x: p.x, z: p.z, heading: p.heading, velocityHeading: p.heading, speed: 0, drift: false, driftBlend: 0, pullUp: 0, driftDir: 1, driftHold: 0,
         progress, lastS: p.s, lateral: 0, boost: 0, resetCooldown: this.difficulty.resetCooldown, wrongWay: 0, missedGate: false,
         stun: 0, slip: 0, bubble: 0, magnet: 0, magnetTarget: -1, zap: 0, ufo: 0 });
       this.events.push({ type: 'reset', id: car.id });
@@ -306,22 +306,39 @@
       car.bubble = Math.max(0, car.bubble - dt); car.magnet = Math.max(0, car.magnet - dt);
       car.shield = Math.max(0, car.shield - dt); car.aiItemCooldown = Math.max(0, car.aiItemCooldown - dt);
       car.zap = Math.max(0, car.zap - dt); car.ufo = Math.max(0, car.ufo - dt);
+      car.pullUp = Math.max(0, car.pullUp - dt);
       const oldDrift = car.drift;
       const desiredSteer = car.stun > 0 ? 0 : clamp(Number(input.steer) || 0, -1, 1);
       // Player steering ramps up faster than AI: digital keys need a snappier lock.
       car.steer = approach(car.steer, car.slip > 0 ? car.slipDir : desiredSteer, dt, car.id === 0 ? 18 : 10);
-      car.drift = Boolean(input.drift && car.speed > 14 && Math.abs(car.steer) > 0.16 && Math.abs(car.lateral) < this.track.width / 2);
+      // Drift hold (player only): while the drift key is held, straightening the
+      // wheel keeps the slide alive for ~0.35s — KartRider's 拖漂 inertia arc.
+      if (car.id === 0) {
+        if (car.drift && Math.abs(car.steer) > 0.16) car.driftHold = 0.35;
+        else car.driftHold = Math.max(0, car.driftHold - dt);
+        if (!input.drift) car.driftHold = 0;
+      }
+      car.drift = Boolean(input.drift && car.speed > 14 && Math.abs(car.lateral) < this.track.width / 2
+        && (Math.abs(car.steer) > 0.16 || (car.id === 0 && car.driftHold > 0)));
+      // Player-only drift feel (QQ Speed / KartRider style). AI keeps the exact
+      // binary path so its tuned lap times stay bit-identical.
+      if (car.id === 0) {
+        // Hop kick: an instant nose pulse on the entry frame makes the drift snap in.
+        if (!oldDrift && car.drift) { car.heading += car.steer * 0.055; car.pullUp = 0; car.driftDir = Math.sign(car.steer) || 1; car.driftHold = 0.35; }
+        // Pull-up: releasing drift opens a short window of fast re-centering.
+        if (oldDrift && !car.drift) car.pullUp = 0.3;
+      }
       // Grip/slide smoothing for the player: drift handling blends in and out over
       // ~0.2s instead of switching instantly, so releasing the drift key re-centers
       // progressively. AI stays on the exact binary path to keep its tuned pace.
-      car.driftBlend = car.id === 0 ? approach(car.driftBlend, car.drift ? 1 : 0, dt, car.drift ? 7 : 4.5) : (car.drift ? 1 : 0);
+      car.driftBlend = car.id === 0 ? approach(car.driftBlend, car.drift ? 1 : 0, dt, car.drift ? 7 : car.pullUp > 0 ? 6.5 : 4.5) : (car.drift ? 1 : 0);
       const offroad = Math.abs(car.lateral) > this.track.width / 2;
       const top = car.bubble > 0 ? 12 : offroad ? this.difficulty.offroadTop : car.boost > 0 ? 61 : car.magnet > 0 ? 54 : (car.id === 0 ? 42 : this.difficulty.aiTopCap);
       const throttle = clamp(Number(input.throttle) || 0, 0, 1);
       if (throttle && car.stun <= 0 && car.bubble <= 0) car.speed += (car.boost > 0 ? 34 : car.magnet > 0 ? 30 : 20) * throttle * dt;
       else car.speed = approach(car.speed, 0, dt, 0.36);
       if (input.brake) car.speed -= (car.speed > 1 ? 42 : 12) * dt;
-      car.speed -= car.speed * (0.06 + 0.1 * car.driftBlend) * dt;
+      car.speed -= car.speed * (0.06 + (car.id === 0 ? 0.06 : 0.1) * car.driftBlend) * dt;
       if (car.stun > 0) car.speed = approach(car.speed, 6, dt, 3);
       if (car.speed > top) car.speed = approach(car.speed, top, dt, offroad ? 4 : 2.8);
       // Lightning and UFO are hard ceilings: being zapped or dragged must feel firm.
@@ -330,10 +347,28 @@
       car.speed = clamp(car.speed, -9, 64);
       if (Math.abs(car.speed) < 0.02) car.speed = 0;
       const speedFactor = clamp(Math.abs(car.speed) / 12, 0, 1);
-      const turnRate = (1.15 - clamp(Math.abs(car.speed) / 70, 0, 0.65)) * (1 + 0.65 * car.driftBlend) * (car.id === 0 ? 1.25 : this.difficulty.turnBoost);
-      car.heading += car.steer * turnRate * speedFactor * dt * (car.speed < 0 ? -1 : 1);
-      const slipTarget = car.heading - car.steer * 0.37 * car.driftBlend;
-      car.velocityHeading += angleDelta(slipTarget, car.velocityHeading) * (1 - Math.exp(-dt * (12 - 6.5 * car.driftBlend)));
+      // Player: mid-drift steering is relative to the locked drift direction
+      // (KartRider/QQ Speed). steerRel > 0 leans deeper, 0 coasts on inertia,
+      // < 0 counter-steers to pull the nose in — it shallows the slide and
+      // stops the turn but never snaps the heading backward.
+      const steerRel = car.id === 0 && car.drift ? clamp(car.steer * car.driftDir, -1, 1) : 0;
+      const turnMag = steerRel >= 0 ? 0.4 + 0.6 * steerRel : 0.4 * (1 + steerRel);
+      const depth = steerRel >= 0 ? 0.7 + 0.6 * steerRel : 0.7 * (1 + steerRel);
+      const driftTurn = car.id === 0 ? 1 + 0.65 * car.driftBlend * (car.drift ? depth : 0.7 + 0.6 * Math.abs(car.steer)) : 1 + 0.65 * car.driftBlend;
+      const turnRate = (1.15 - clamp(Math.abs(car.speed) / 70, 0, 0.65)) * driftTurn * (car.id === 0 ? 1.25 : this.difficulty.turnBoost);
+      const headingSteer = car.id === 0 && car.drift ? car.driftDir * turnMag : car.steer;
+      car.heading += headingSteer * turnRate * speedFactor * dt * (car.speed < 0 ? -1 : 1);
+      // Player: nonlinear slip angle — light stick stays shallow (point-drift), full
+      // lock digs to 0.5 rad; velocity follows faster (8.5/s) so the tail feels
+      // connected; pull-up window snaps the nose straight at 18/s on release.
+      const slipDepth = steerRel >= 0 ? 0.2 + 0.3 * steerRel : 0.2 * (1 + steerRel);
+      const slipTarget = car.id === 0
+        ? car.heading - (car.drift ? car.driftDir * slipDepth : car.steer * (0.2 + 0.3 * Math.abs(car.steer))) * car.driftBlend
+        : car.heading - car.steer * 0.37 * car.driftBlend;
+      const followRate = car.id === 0
+        ? (car.pullUp > 0 && !car.drift ? 18 : 12 - 3.5 * car.driftBlend)
+        : 12 - 6.5 * car.driftBlend;
+      car.velocityHeading += angleDelta(slipTarget, car.velocityHeading) * (1 - Math.exp(-dt * followRate));
       car.x += Math.sin(car.velocityHeading) * car.speed * dt;
       car.z += Math.cos(car.velocityHeading) * car.speed * dt;
       if (car.drift) {
