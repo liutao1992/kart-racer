@@ -14,6 +14,7 @@ test('menu, local rendering, all tracks, color selection, guide and responsive l
   await expect(page.locator('.track-card')).toHaveCount(9);
   await page.screenshot({ path: info.outputPath('menu-desktop.png'), fullPage: true });
   for (const track of tracks) {
+    if (await page.locator(`[data-track="${track.id}"]`).isHidden()) await page.getByRole('button', { name: '下一页赛道', exact: true }).click();
     await page.locator(`[data-track="${track.id}"]`).click();
     await expect(page.locator('#preview-title')).toHaveText(track.name);
     expect((await snapshot(page)).track).toBe(track.id);
@@ -30,6 +31,36 @@ test('menu, local rendering, all tracks, color selection, guide and responsive l
     await page.screenshot({ path: info.outputPath(`menu-${width}.png`), fullPage: true });
   }
   expect(errors).toEqual([]);
+});
+
+test('track pages preserve selection and restore the saved track page', async ({ page }) => {
+  await loaded(page);
+  await expect(page.locator('.track-card:visible')).toHaveCount(3);
+  await expect(page.locator('#tracks-previous')).toBeDisabled();
+  const initialTrack = (await snapshot(page)).track;
+  const initialSave = await page.evaluate(() => localStorage.getItem('breeze-kart-v1'));
+  await page.locator('#tracks-next').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#tracks-page')).toHaveText('赛道 04 — 06 · 2 / 3 页');
+  expect((await snapshot(page)).track).toBe(initialTrack);
+  expect(await page.evaluate(() => localStorage.getItem('breeze-kart-v1'))).toBe(initialSave);
+  await page.locator('#tracks-next').click();
+  await expect(page.locator('#tracks-next')).toBeDisabled();
+  await page.locator('[data-track="akina"]').click();
+  await page.reload();
+  await expect(page.locator('#start-button')).toBeEnabled();
+  await expect(page.locator('#tracks-page')).toHaveText('赛道 07 — 09 · 3 / 3 页');
+  await expect(page.locator('[data-track="akina"]')).toBeVisible();
+  await expect(page.locator('[data-track="akina"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#tracks-previous').click();
+  await page.locator('#tracks-previous').click();
+  await expect(page.locator('#tracks-previous')).toBeDisabled();
+  await page.locator('#start-button').click();
+  expect((await snapshot(page)).track).toBe('akina');
+  await page.keyboard.press('Escape');
+  await page.locator('#menu-button').click();
+  await expect(page.locator('#tracks-page')).toHaveText('赛道 07 — 09 · 3 / 3 页');
+  await expect(page.locator('[data-track="akina"]')).toBeVisible();
 });
 
 test('file URL works offline, settings persist and blocked storage is tolerated', async ({ page, context }, info) => {
