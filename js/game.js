@@ -68,6 +68,18 @@
     ctx.fillStyle = track.accent; ctx.beginPath(); ctx.arc(p.x, p.y - 1, 3.5, 0, Math.PI * 2); ctx.fill();
     for (let i = 0; i < 8; i++) { const x = 25 + i * 21 % 143, y = 12 + i * 37 % 101; ctx.fillStyle = i % 2 ? '#527d6377' : '#ffffff33'; ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill(); }
   }
+  const TRACKS_PER_PAGE = 3;
+  let trackPage = Math.floor(selectedIndex / TRACKS_PER_PAGE);
+  function showTrackPage(page) {
+    const pages = Math.ceil(tracks.length / TRACKS_PER_PAGE);
+    trackPage = Math.max(0, Math.min(pages - 1, page));
+    document.querySelectorAll('.track-card').forEach((button, i) => { button.hidden = Math.floor(i / TRACKS_PER_PAGE) !== trackPage; });
+    const first = String(trackPage * TRACKS_PER_PAGE + 1).padStart(2, '0');
+    const last = String(Math.min((trackPage + 1) * TRACKS_PER_PAGE, tracks.length)).padStart(2, '0');
+    $('tracks-page').textContent = `赛道 ${first} — ${last} · ${trackPage + 1} / ${pages} 页`;
+    $('tracks-previous').disabled = trackPage === 0;
+    $('tracks-next').disabled = trackPage === pages - 1;
+  }
   function buildTrackButtons() {
     const list = $('track-list');
     $('preview-number').querySelector('span').textContent = ' / ' + String(tracks.length).padStart(2, '0');
@@ -82,6 +94,9 @@
       const check = document.createElement('span'); check.className = 'track-check'; check.textContent = '✓'; check.setAttribute('aria-hidden', 'true'); button.append(check);
       button.addEventListener('click', () => { if (preview) selectTrack(i); }); list.append(button);
     });
+    showTrackPage(trackPage);
+    $('tracks-previous').addEventListener('click', () => { if (preview) showTrackPage(trackPage - 1); });
+    $('tracks-next').addEventListener('click', () => { if (preview) showTrackPage(trackPage + 1); });
   }
   function updateSelection() {
     const track = tracks[selectedIndex];
@@ -97,6 +112,7 @@
   }
   function selectTrack(index) {
     selectedIndex = index; race = new C.Race(tracks[index], color, Math.random, difficulty); resultShown = false;
+    showTrackPage(Math.floor(selectedIndex / TRACKS_PER_PAGE));
     updateSelection(); world.load(tracks[index], race); persist();
   }
   // Difficulty applies to the next race; the menu preview race rebuilds instantly.
