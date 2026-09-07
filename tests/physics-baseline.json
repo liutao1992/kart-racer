@@ -1,0 +1,56 @@
+{
+  "source": "d55107104a50fdbc606b1b0759079da57be14572 (upstream drift improvements before typing migration)",
+  "framesPerCase": 3000,
+  "results": [
+    {
+      "seed": 7,
+      "difficulty": "easy",
+      "sha256": "fcdbf4ecb3243942cc880ab1e1fe1dc679e832fff9e6f9d4884e6183174fbf9d"
+    },
+    {
+      "seed": 7,
+      "difficulty": "normal",
+      "sha256": "b437621f512c4a4b15a4343f37f3c2fdc4678783964a03c7affeff94f6f073f2"
+    },
+    {
+      "seed": 7,
+      "difficulty": "master",
+      "sha256": "5e682f14a390d57d3c83b3ce67718856d8a42f91ac038712a9c11dd74542edf8"
+    },
+    {
+      "seed": 7,
+      "difficulty": "legend",
+      "sha256": "b58820b10e80dfec176982ab303a15bd2401e500e6288c767bde8eeedf87ba42"
+    },
+    {
+      "seed": 7,
+      "difficulty": "hell",
+      "sha256": "235a5ca7f8b6d26bfcffd37423090b91f8b68b205fc3db003159916509331431"
+    },
+    {
+      "seed": 19,
+      "difficulty": "easy",
+      "sha256": "8433e41e7790f914cc1b665c2e3a090fa001e884c6ea303fc9624cbf7528a196"
+    },
+    {
+      "seed": 19,
+      "difficulty": "normal",
+      "sha256": "7a5401a68f8b51f42eccbf72afebb040b3da85ce4e3da24403b7d8bd91e244ea"
+    },
+    {
+      "seed": 19,
+      "difficulty": "master",
+      "sha256": "aadcc114bcdd89ac43c519a9a3dda57b2d34f2f276ce736acfdde602a12e2ba3"
+    },
+    {
+      "seed": 19,
+      "difficulty": "legend",
+      "sha256": "d685447a9bcea3544bfe572d9248ba70a1a053cf99134a383d56af80e66d697b"
+    },
+    {
+      "seed": 19,
+      "difficulty": "hell",
+      "sha256": "9627ae4ef8ac6e1a107996018a4c3ce262e7a713b1b01e0255910addc1d946e2"
+    }
+  ]
+}

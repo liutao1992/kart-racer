@@ -8,33 +8,39 @@
       this.canvas = canvas;
       this.motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
       this.reducedMotion = this.motionPreference.matches;
-      this.motionPreference.addEventListener('change', () => {
+      this.onMotionChange = () => {
         this.reducedMotion = this.motionPreference.matches;
         if (this.sparkFX) this.resetDriftEffects();
-      });
+      };
+      this.motionPreference.addEventListener('change', this.onMotionChange);
       this.effectDensity = (navigator.deviceMemory !== undefined ? navigator.deviceMemory <= 2 : navigator.hardwareConcurrency <= 4) ? 0.55 : 1;
       this.renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
-      this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+      // OS display scaling must not multiply fullscreen GPU work without a limit.
+      this.pixelBudget = this.effectDensity < 1 ? 1280 * 720 : 1920 * 1080;
+      this.pixelRatio = 1;
       this.renderer.outputColorSpace = T.SRGBColorSpace;
       this.renderer.toneMapping = T.ACESFilmicToneMapping;
-      this.renderer.toneMappingExposure = 1.24;
+      this.renderer.toneMappingExposure = 1.06;
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = T.PCFSoftShadowMap;
       this.scene = new T.Scene();
       this.camera = new T.PerspectiveCamera(49, 1, 0.2, 1800);
       this.cameraPosition = new T.Vector3(); this.cameraTarget = new T.Vector3(); this.cameraHeading = 0;
-      this.ambient = new T.HemisphereLight('#f6fff7', '#819779', 2.1);
+      this.wantedPosition = new T.Vector3(); this.wantedTarget = new T.Vector3();
+      this.ambient = new T.HemisphereLight('#edf5ff', '#819779', 1.5);
       this.scene.add(this.ambient);
-      this.sun = new T.DirectionalLight('#fff4d5', 3.1);
+      this.sun = new T.DirectionalLight('#fff4e5', 2.65);
       this.sun.position.set(-60, 100, 55);
       this.sun.castShadow = true;
-      this.sun.shadow.mapSize.set(2048, 2048);
+      this.sun.shadow.mapSize.set(1024, 1024);
       this.sun.shadow.camera.near = 1; this.sun.shadow.camera.far = 400;
-      this.sun.shadow.camera.left = -70; this.sun.shadow.camera.right = 70;
-      this.sun.shadow.camera.top = 70; this.sun.shadow.camera.bottom = -70;
+      // Spend shadow texels around the chase camera; retain wheel/contact detail at 1024².
+      this.sun.shadow.camera.left = -38; this.sun.shadow.camera.right = 38;
+      this.sun.shadow.camera.top = 38; this.sun.shadow.camera.bottom = -38;
       this.sun.shadow.bias = -0.00035;
       this.sun.shadow.normalBias = 0.12;
       this.scene.add(this.sun, this.sun.target);
+      this.fill = new T.DirectionalLight('#b8d9ff', 0.65); this.fill.position.set(40, 35, -55); this.scene.add(this.fill);
       this.level = null; this.carModels = []; this.materials = new Map();
       this.clock = 0; this.lastWidth = 0; this.lastHeight = 0;
       this.observer = new ResizeObserver(() => this.resize()); this.observer.observe(canvas.parentElement);
@@ -65,6 +71,8 @@
     }
     clear() {
       if (!this.level) return;
+      this.itemEffects?.dispose(); this.itemEffects = null;
+      this.kartFactory?.dispose(); this.kartFactory = null;
       const geometries = new Set(), materials = new Set(), textures = new Set();
       for (const group of [this.level, this.carsGroup, this.effectsGroup, this.itemsGroup].filter(Boolean)) {
         group.traverse(obj => { if (obj.geometry) geometries.add(obj.geometry); if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => { materials.add(m); if (m.map) textures.add(m.map); }); });
@@ -72,6 +80,11 @@
       }
       geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); textures.forEach(t => t.dispose());
       this.materials.clear(); this.carModels = []; this.boxModels = this.bananaModels = this.missileModels = this.waterModels = [];
+    }
+    destroy() {
+      this.observer.disconnect();
+      this.motionPreference.removeEventListener('change', this.onMotionChange);
+      this.clear(); this.sun.shadow.map?.dispose(); this.renderer.dispose();
     }
     load(track, race) {
       this.clear(); this.track = track; this.race = race;
@@ -154,11 +167,15 @@
         }
       }
       this.mergeStatic();
-      for (const car of race.cars) this.carModels.push(this.createKart(car.color));
-      this.createItems(race);
+      this.kartFactory = new root.KartModels(this);
+      for (const car of race.cars) this.carModels.push(this.kartFactory.create(car.color));
       this.createEffects();
+      this.itemEffects = new root.KartItemEffects(this, race);
+      this.previousTransforms = race.cars.map(car => ({ x: car.x, z: car.z, heading: car.heading, velocityHeading: car.velocityHeading }));
       this.cameraReady = false;
       this.update(race, 1 / 60, true);
+      // Compile dormant item/particle materials during setup, before their first race event.
+      this.renderer.compile(this.scene, this.camera);
     }
     ribbon(left, right, y, material, filter = null) {
       if (left > right) [left, right] = [right, left];
@@ -352,59 +369,15 @@
         const m = new T.Mesh(geometry, b.material); m.castShadow = b.shadow; m.receiveShadow = true; this.level.add(m);
       }
     }
-    createKart(color) {
-      const group = new T.Group(), body = new T.Group(); group.add(body); this.carsGroup.add(group);
-      const paint = new T.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.09 });
-      this.rounded(2.28, 0.4, 3.2, '#394946', 0, 0.49, 0, body);
-      this.rounded(2.05, 0.49, 3, paint, 0, 0.77, 0, body);
-      this.rounded(2.4, 0.36, 0.66, paint, 0, 0.53, 1.6, body);
-      this.rounded(1.35, 0.34, 1.05, paint, 0, 0.96, 1.14, body);
-      this.rounded(0.29, 0.022, 1.46, '#fff7d9', 0, 1.148, 1.02, body);
-      this.rounded(1.04, 0.66, 0.6, '#445350', 0, 1.03, -0.66, body);
-      this.box(0.8, 0.09, 0.7, '#737e66', 0, 0.72, -0.17, body);
-      for (const side of [-1, 1]) {
-        this.rounded(0.47, 0.54, 1.37, paint, side * 1.03, 0.68, -0.27, body);
-        this.rounded(0.36, 0.18, 0.05, '#fff4c4', side * 0.73, 0.71, 1.953, body);
-        this.rounded(0.27, 0.12, 0.06, '#d6503b', side * 0.78, 0.75, -1.6, body);
-        this.mesh(new T.CylinderGeometry(0.16, 0.18, 0.49, 10), '#586262', side * 0.67, 0.48, -1.8, body).rotation.x = Math.PI / 2;
-        this.box(0.08, 0.6, 0.1, '#485b54', side * 0.85, 1.1, -1.3, body);
+    setColor(color) { this.kartFactory.color(this.carModels[0], color); }
+    handleRaceEvent(event, race) {
+      if (race !== this.race) return;
+      this.itemEffects?.handle(event);
+      if (event.type === 'reset' && this.carModels[event.id]) {
+        this.carModels[event.id].lastSpeed = 0; this.carModels[event.id].acceleration = 0;
+        this.copyTransform(this.previousTransforms[event.id], race.cars[event.id]);
       }
-      this.rounded(2.45, 0.18, 0.51, paint, 0, 1.42, -1.3, body);
-      const wheels = [];
-      for (const side of [-1, 1]) for (const z of [-1.04, 1.1]) {
-        const wheel = new T.Group(); wheel.position.set(side * 1.25, 0.47, z); group.add(wheel); wheels.push(wheel);
-        const tire = this.mesh(new T.CylinderGeometry(0.49, 0.49, 0.42, 16), '#2f3c3b', 0, 0, 0, wheel); tire.rotation.z = Math.PI / 2;
-        const hub = this.mesh(new T.CylinderGeometry(0.27, 0.27, 0.44, 12), '#e5deca', 0, 0, 0, wheel); hub.rotation.z = Math.PI / 2;
-        const center = this.mesh(new T.CylinderGeometry(0.12, 0.12, 0.46, 8), paint, 0, 0, 0, wheel); center.rotation.z = Math.PI / 2;
-      }
-      const driver = new T.Group(); body.add(driver);
-      const torso = this.mesh(new T.SphereGeometry(0.42, 14, 10), '#f3eada', 0, 1.17, -0.24, driver); torso.scale.set(1, 1.1, 0.85);
-      const helmet = this.mesh(new T.SphereGeometry(0.68, 20, 14), paint, 0, 1.99, -0.29, driver); helmet.scale.set(1.04, 1.03, 1);
-      const stripe = this.mesh(new T.SphereGeometry(0.691, 16, 12, 0, 0.26), '#fff4d4', 0, 1.99, -0.29, driver); stripe.rotation.y = -0.13;
-      this.rounded(1.02, 0.33, 0.25, '#314f54', 0, 1.98, 0.3, driver);
-      this.rounded(0.66, 0.14, 0.035, '#a2d3cf', -0.06, 2.04, 0.437, driver);
-      this.rounded(0.61, 0.2, 0.11, '#ffe2b8', 0, 1.69, 0.28, driver);
-      for (const side of [-1, 1]) {
-        const arm = this.mesh(new T.CapsuleGeometry(0.13, 0.38, 3, 8), '#f6e8d5', side * 0.43, 1.29, 0.09, driver); arm.rotation.x = -0.8; arm.rotation.z = side * 0.4;
-        this.ball(0.16, '#735f4e', side * 0.36, 1.28, 0.37, driver, 1);
-      }
-      const wheel = this.mesh(new T.TorusGeometry(0.35, 0.055, 5, 14), '#3a514c', 0, 1.31, 0.51, body); wheel.rotation.x = -0.55;
-      const flames = [];
-      for (const side of [-1, 1]) {
-        const flame = this.mesh(new T.ConeGeometry(0.29, 1.55, 7), new T.MeshBasicMaterial({ color: '#8aeeee', transparent: true, opacity: 0.85 }), side * 0.67, 0.5, -2.4, body);
-        flame.rotation.x = -Math.PI / 2; flame.visible = false; flames.push(flame);
-      }
-      const shieldMesh = this.mesh(new T.SphereGeometry(2.1, 18, 14), new T.MeshBasicMaterial({ color: '#7ce8c5', transparent: true, opacity: 0.22, depthWrite: false }), 0, 1.1, 0, group);
-      shieldMesh.visible = false; shieldMesh.castShadow = false;
-      const bubbleMesh = this.mesh(new T.SphereGeometry(1.9, 18, 14), new T.MeshBasicMaterial({ color: '#8ad4f5', transparent: true, opacity: 0.35, depthWrite: false }), 0, 1.1, 0, group);
-      bubbleMesh.visible = false; bubbleMesh.castShadow = false;
-      const ufoMesh = new T.Group(); ufoMesh.position.y = 3.4; ufoMesh.visible = false; group.add(ufoMesh);
-      const saucer = this.mesh(new T.SphereGeometry(0.95, 16, 10), '#a8b6c4', 0, 0, 0, ufoMesh); saucer.scale.set(1, 0.32, 1);
-      const dome = this.mesh(new T.SphereGeometry(0.42, 12, 8), new T.MeshBasicMaterial({ color: '#bfe8ff', transparent: true, opacity: 0.6 }), 0, 0.3, 0, ufoMesh);
-      dome.castShadow = false;
-      return { group, body, driver, wheels, paint, flames, shieldMesh, bubbleMesh, ufoMesh };
     }
-    setColor(color) { this.carModels[0].paint.color.set(color); }
     createParticlePool(count, spark) {
       const geometry = new T.BufferGeometry();
       const attributes = { position: 3, aTint: 3, aSize: 1, aOpacity: 1, aRotation: 1 };
@@ -465,75 +438,6 @@
       return { mesh, count, spark, cursor: 0, active: 0,
         life: new Float32Array(count), duration: new Float32Array(count),
         velocity: new Float32Array(count * 3), size: new Float32Array(count), opacity: new Float32Array(count) };
-    }
-    // Item visuals live in itemsGroup: they move every frame, so they must never join mergeStatic's level group.
-    createItems(race) {
-      this.boxModels = race.boxes.map(box => {
-        const g = new T.Group(); g.position.set(box.x, 1.1, box.z); this.itemsGroup.add(g);
-        this.rounded(1.1, 1.1, 1.1, '#4a90d9', 0, 0, 0, g);
-        const face = this.textMaterial('?', '#4a90d9', '#fff7e3', 128, 128);
-        for (const side of [0.56, -0.56]) {
-          const q = this.mesh(new T.PlaneGeometry(0.8, 0.8), face, 0, 0, side, g);
-          q.castShadow = false; if (side < 0) q.rotation.y = Math.PI;
-        }
-        return g;
-      });
-      this.bananaModels = [];
-      for (let i = 0; i < 8; i++) {
-        const b = this.mesh(new T.TorusGeometry(0.55, 0.2, 8, 14, Math.PI * 1.35), '#f5c93f', 0, 0.3, 0, this.itemsGroup);
-        b.rotation.set(Math.PI / 2, 0, 1.1); b.visible = false; this.bananaModels.push(b);
-      }
-      this.missileModels = [];
-      for (let i = 0; i < 4; i++) {
-        const g = new T.Group(); g.visible = false; this.itemsGroup.add(g);
-        const cone = this.mesh(new T.ConeGeometry(0.35, 1.6, 8), '#d6503b', 0, 0, 0, g); cone.rotation.x = Math.PI / 2;
-        this.ball(0.3, '#fff7e3', 0, 0, 0.7, g, 1);
-        this.missileModels.push(g);
-      }
-      this.waterModels = [];
-      for (let i = 0; i < 4; i++) {
-        const g = new T.Group(); g.visible = false; this.itemsGroup.add(g);
-        const orb = this.mesh(new T.SphereGeometry(0.8, 14, 10), new T.MeshStandardMaterial({ color: '#5fb8e8', transparent: true, opacity: 0.65, roughness: 0.2 }), 0, 0, 0, g);
-        orb.castShadow = false;
-        const ring = this.mesh(new T.TorusGeometry(1, 0.18, 6, 24), new T.MeshBasicMaterial({ color: '#8ad4f5', transparent: true, opacity: 0.5, depthWrite: false }), 0, 0.4, 0, g);
-        ring.rotation.x = -Math.PI / 2; ring.castShadow = false;
-        this.waterModels.push(g);
-      }
-    }
-    updateItems(race, dt) {
-      for (let i = 0; i < race.boxes.length; i++) {
-        const mesh = this.boxModels[i];
-        mesh.visible = race.boxes[i].respawn <= 0;
-        if (mesh.visible && !this.reducedMotion) { mesh.rotation.y += dt * 1.8; mesh.position.y = 1.1 + Math.sin(this.clock * 2 + i) * 0.15; }
-      }
-      const bananas = race.hazards.filter(h => h.kind === 'banana');
-      this.bananaModels.forEach((m, i) => {
-        const h = bananas[i];
-        m.visible = Boolean(h);
-        if (h) m.position.set(h.x, 0.3, h.z);
-      });
-      const waters = race.hazards.filter(h => h.kind === 'water');
-      this.waterModels.forEach((g, i) => {
-        const h = waters[i];
-        g.visible = Boolean(h);
-        if (!h) return;
-        g.position.set(h.x, 0, h.z);
-        const orb = g.children[0], ring = g.children[1];
-        if (h.arm > 0) { orb.visible = true; orb.position.y = 0.8 + 4 * h.arm; ring.visible = false; }
-        else { orb.visible = false; ring.visible = true; ring.scale.setScalar(Math.max(0.01, (0.5 - h.blast) * 14)); }
-      });
-      this.missileModels.forEach((g, i) => {
-        const m = race.missiles[i];
-        g.visible = Boolean(m);
-        if (!m) return;
-        const p = C.sample(this.track, m.progress, m.lateral);
-        g.position.set(p.x, 0.7, p.z); g.rotation.y = p.heading;
-      });
-    }
-    hitBurst(car) {
-      if (this.reducedMotion || !this.race || this.race.state !== 'racing') return;
-      const hx = Math.sin(car.heading), hz = Math.cos(car.heading);
-      for (const side of [-1, 1]) for (let i = 0; i < Math.ceil(7 * this.effectDensity); i++) this.spawnParticle(this.sparkFX, car.x, car.z, hx, hz, side, car.speed, true);
     }
     createEffects() {
       this.sparkFX = this.createParticlePool(Math.ceil(240 * this.effectDensity), true);
@@ -597,7 +501,7 @@
     }
     updateEffects(car, dt) {
       this.ageParticles(this.sparkFX, dt); this.ageParticles(this.smokeFX, dt);
-      const drifting = car.drift && this.race.state === 'racing';
+      const drifting = (car.drift || car.slip > 0) && this.race.state === 'racing';
       const intensity = car.nitro === 2 ? 1 : C.clamp(car.charge / 100, 0, 1);
       this.driftTint.lerpColors(this.driftBlue, this.driftGold, C.clamp((intensity - 0.3) / 0.5, 0, 1));
       this.burstTime = Math.max(0, this.burstTime - dt);
@@ -605,7 +509,9 @@
       this.tireGlow.visible = this.glowStrength > 0.01 || this.burstTime > 0;
       this.tireGlow.material.color.copy(this.burstTime > 0 ? this.driftGold : this.driftTint);
       this.tireGlow.material.opacity = Math.min(0.85, this.glowStrength + this.burstTime * 0.6);
-      const hx = Math.sin(car.heading), hz = Math.cos(car.heading);
+      const effectHeading = car.heading + (this.carModels[car.id]?.visual.rotation.y || 0);
+      const hx = Math.sin(effectHeading), hz = Math.cos(effectHeading);
+      // Tire marks follow the visible axles during a banana spin as well as normal drifting.
       // Emission uses elapsed time; interpolate wheel positions to avoid gaps at low FPS.
       if (drifting && !this.reducedMotion) {
         this.sparkCarry += dt * (55 + intensity * 28) * this.effectDensity;
@@ -649,55 +555,65 @@
     }
     resize() {
       const width = this.canvas.parentElement.clientWidth, height = this.canvas.parentElement.clientHeight;
-      if (width === this.lastWidth && height === this.lastHeight) return;
+      const ratio = Math.min(devicePixelRatio || 1, 1.75, Math.sqrt(this.pixelBudget / Math.max(1, width * height)));
+      if (width === this.lastWidth && height === this.lastHeight && Math.abs(ratio - this.pixelRatio) < .001) return;
       this.lastWidth = width; this.lastHeight = height;
+      this.pixelRatio = ratio; this.renderer.setPixelRatio(ratio);
       this.renderer.setSize(width, height, false); this.camera.aspect = width / Math.max(1, height); this.camera.updateProjectionMatrix();
     }
-    update(race, dt, preview) {
+    copyTransform(target, car) {
+      target.x = car.x; target.z = car.z; target.heading = car.heading; target.velocityHeading = car.velocityHeading;
+    }
+    capturePreviousTransforms(race) {
+      for (let i = 0; i < race.cars.length; i++) this.copyTransform(this.previousTransforms[i], race.cars[i]);
+    }
+    update(race, dt, preview, interpolation = 1) {
+      if (race.state === 'paused') dt = 0;
+      const alpha = preview || race.state === 'paused' ? 1 : C.clamp(interpolation, 0, 1);
       this.clock += dt;
       for (let i = 0; i < race.cars.length; i++) {
-        const car = race.cars[i], model = this.carModels[i];
-        model.group.position.set(car.x, 0.17, car.z); model.group.rotation.y = car.heading;
-        model.body.rotation.z = this.reducedMotion ? 0 : -car.steer * Math.min(car.speed / 42, 1) * 0.045;
-        model.driver.rotation.z = this.reducedMotion ? 0 : -car.steer * 0.1;
-        model.body.position.y = !this.reducedMotion && Math.abs(car.speed) > 2 ? Math.sin(this.clock * 25) * 0.012 : 0;
-        model.wheels.forEach((w, j) => { if (j % 2 === 1) w.rotation.y = car.steer * 0.34; });
-        model.flames.forEach((f, j) => { f.visible = car.boost > 0 && race.state === 'racing'; f.scale.y = this.reducedMotion ? 1 : 0.85 + Math.sin(this.clock * 47 + j) * 0.25; });
-        model.shieldMesh.visible = car.shield > 0 && race.state === 'racing';
-        model.bubbleMesh.visible = car.bubble > 0;
-        // The spin is visual only; physics heading stays put so wrong-way and gates are not disturbed.
-        model.body.rotation.y = car.stun > 0 && !this.reducedMotion ? (this.clock * 11) % (Math.PI * 2) : 0;
-        model.ufoMesh.visible = car.ufo > 0;
-        if (car.ufo > 0 && !this.reducedMotion) { model.ufoMesh.rotation.y += dt * 6; model.ufoMesh.position.y = 3.4 + Math.sin(this.clock * 5) * 0.15; }
+        const model = this.carModels[i], car = race.cars[i], previous = this.previousTransforms[i];
+        this.kartFactory.update(model, car, dt, this.clock, this.reducedMotion);
+        // Interpolate only presentation anchors. Teleports/resets snap; simulation remains untouched.
+        if (alpha < 1 && Math.hypot(car.x - previous.x, car.z - previous.z) < 8) {
+          model.group.position.x = C.lerp(previous.x, car.x, alpha);
+          model.group.position.z = C.lerp(previous.z, car.z, alpha);
+          model.group.rotation.y = previous.heading + C.angleDelta(car.heading, previous.heading) * alpha;
+        }
       }
-      this.updateItems(race, dt);
+      this.itemEffects.update(dt);
       const p = race.player;
+      const anchor = this.carModels[p.id].group.position;
       if (preview) {
         const s = C.sample(this.track, p.progress);
         const angle = s.heading + 0.69 + (this.reducedMotion ? 0 : Math.sin(this.clock * 0.15) * 0.1);
         const distance = this.camera.aspect < 1.5 ? 22 : 20;
-        const wanted = new T.Vector3(p.x + Math.sin(angle) * distance, 10.5, p.z + Math.cos(angle) * distance);
-        const target = new T.Vector3(p.x + s.rx * 1.5, 0.9, p.z + s.rz * 1.5);
+        const wanted = this.wantedPosition.set(p.x + Math.sin(angle) * distance, 10.5, p.z + Math.cos(angle) * distance);
+        const target = this.wantedTarget.set(p.x + s.rx * 1.5, 0.9, p.z + s.rz * 1.5);
         this.cameraPosition.copy(wanted); this.cameraTarget.copy(target);
         this.camera.fov = 45;
       } else {
         if (!this.cameraReady) this.cameraHeading = p.heading;
-        this.cameraHeading += C.angleDelta(p.velocityHeading, this.cameraHeading) * (1 - Math.exp(-dt * 5));
+        const previous = this.previousTransforms[p.id];
+        const velocityHeading = previous.velocityHeading + C.angleDelta(p.velocityHeading, previous.velocityHeading) * alpha;
+        this.cameraHeading += C.angleDelta(velocityHeading, this.cameraHeading) * (1 - Math.exp(-dt * 5));
         const distance = 10.4 + Math.max(0, p.speed) * 0.028 + (this.reducedMotion ? 0 : p.boost > 0 ? 0.9 : 0);
         const hx = Math.sin(this.cameraHeading), hz = Math.cos(this.cameraHeading);
-        const wanted = new T.Vector3(p.x - hx * distance, 5.6, p.z - hz * distance);
-        const target = new T.Vector3(p.x + hx * 11, 1.2, p.z + hz * 11);
+        const wanted = this.wantedPosition.set(anchor.x - hx * distance, 5.6, anchor.z - hz * distance);
+        const target = this.wantedTarget.set(anchor.x + hx * 11, 1.2, anchor.z + hz * 11);
         if (!this.cameraReady) { this.cameraPosition.copy(wanted); this.cameraTarget.copy(target); }
         else { this.cameraPosition.lerp(wanted, 1 - Math.exp(-dt * 9)); this.cameraTarget.lerp(target, 1 - Math.exp(-dt * 11)); }
         this.camera.fov = C.approach(this.camera.fov, this.reducedMotion ? 57 : 54 + p.speed * 0.11 + (p.boost > 0 ? 5 : 0), dt, 3);
       }
       this.cameraReady = !preview;
       this.camera.position.copy(this.cameraPosition); this.camera.lookAt(this.cameraTarget); this.camera.updateProjectionMatrix();
-      this.sun.position.set(p.x - 45, 85, p.z + 35); this.sun.target.position.set(p.x, 0, p.z);
+      this.sun.position.set(anchor.x - 45, 85, anchor.z + 35); this.sun.target.position.set(anchor.x, 0, anchor.z);
       if (!preview && race.state !== 'paused') this.updateEffects(p, dt);
       this.renderer.render(this.scene, this.camera);
     }
     stats() { return { calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles, geometries: this.renderer.info.memory.geometries, textures: this.renderer.info.memory.textures,
+      resolution: { width: this.canvas.width, height: this.canvas.height, pixelRatio: this.pixelRatio, pixelBudget: this.pixelBudget, shadowSize: this.sun.shadow.mapSize.x },
+      items: this.itemEffects?.stats(),
       effects: { sparks: this.sparkFX.active, smoke: this.smokeFX.active, skids: Math.min(this.skidCursor, this.skidCount), glow: this.tireGlow.material.opacity, capacity: this.sparkFX.count + this.smokeFX.count, reducedMotion: this.reducedMotion } }; }
   }
   root.KartWorld = World;

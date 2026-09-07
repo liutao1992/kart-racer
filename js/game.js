@@ -40,7 +40,9 @@
   let toastUntil = 0, goUntil = 0, shownCountdown = -1, resultShown = false, lastRankOrder = '', finishAudioUntil = 0, driftReadyUntil = 0;
   const driftFeedback = $('drift-feedback'), nitroPanel = $('nitro-panel');
   let guideReturnFocus = null;
-  const keys = new Set(), gameKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyR', 'Escape', 'ControlLeft', 'ControlRight']);
+  let discardHold = null;
+  const discardProgress = $('item-discard-progress'), discardFill = $('item-discard-fill');
+  const keys = new Set(), gameKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyR', 'KeyC', 'KeyQ', 'Escape', 'ControlLeft', 'ControlRight']);
   const ITEM_LABELS = { missile: '导弹', banana: '香蕉皮', water: '水炸弹', magnet: '磁铁', shield: '护盾', nitro: '加速器', lightning: '闪电', ufo: 'UFO 飞碟' };
   const ITEM_ICONS = { missile: '🚀', banana: '🍌', water: '💧', magnet: '🧲', shield: '🛡️', nitro: '⚡', lightning: '🌩️', ufo: '🛸' };
   const ITEM_USE_TOAST = { missile: '导弹发射，锁定前方对手！', banana: '香蕉皮已丢在身后', water: '水炸弹抛出去了！', magnet: '磁铁吸附，全速追上去！', shield: '护盾开启，抵挡一次攻击', nitro: '✦ 道具氮气 +1', lightning: '闪电出击，对手集体麻痹！', ufo: 'UFO 出动，拖住第一名！' };
@@ -111,19 +113,21 @@
     document.querySelectorAll('.control-choice').forEach(button => { const on = button.dataset.control === controlMode; button.classList.toggle('selected', on); button.setAttribute('aria-pressed', String(on)); });
     document.querySelectorAll('.ctl-kb').forEach(el => el.hidden = usingPad());
     document.querySelectorAll('.ctl-gp').forEach(el => el.hidden = !usingPad());
-    dom['game-canvas'].setAttribute('aria-label', usingPad() ? '游戏画面，使用手柄左摇杆转向，RT 油门，A 漂移，B 氮气，X 使用道具' : '游戏画面，使用方向键驾驶，Shift 漂移，空格氮气，Ctrl 使用道具');
+    dom['game-canvas'].setAttribute('aria-label', usingPad() ? '游戏画面，使用手柄左摇杆转向，RT 油门，A 漂移，B 氮气，X 使用道具，RB 切换，长按十字键下丢弃' : '游戏画面，使用方向键驾驶，Shift 漂移，空格氮气，Ctrl 使用道具，C 切换，长按 Q 丢弃');
+    const discardKey = usingPad() ? '十字键下' : 'Q';
+    discardProgress.setAttribute('aria-label', `丢弃当前道具，松开 ${discardKey} 取消`);
     updateGamepadStatus();
   }
   function selectControlMode(mode) {
     if (!preview || mode === controlMode || !CONTROL_MODES.includes(mode)) return;
-    controlMode = mode; KartGamepad.setEnabled(usingPad()); updateControlUI(); persist();
+    cancelDiscard(); controlMode = mode; KartGamepad.setEnabled(usingPad()); updateControlUI(); persist();
     if (usingPad() && !KartGamepad.connected()) toast('未检测到手柄，连接后按手柄任意键唤醒', 2500);
   }
   function toast(message, duration = 2200) { dom.toast.textContent = message; dom.toast.hidden = false; toastUntil = performance.now() + duration; }
   function startRace() {
     if (!world || dom['guide-overlay'].hidden === false) return;
     void audio.unlock();
-    keys.clear(); KartGamepad.resetEdges(); preview = false; resultShown = false; accumulator = 0; shownCountdown = -1; lastRankOrder = ''; finishAudioUntil = 0; goUntil = 0; driftReadyUntil = 0;
+    cancelDiscard(); keys.clear(); KartGamepad.resetEdges(); preview = false; resultShown = false; accumulator = 0; shownCountdown = -1; lastRankOrder = ''; finishAudioUntil = 0; goUntil = 0; driftReadyUntil = 0;
     race = new C.Race(tracks[selectedIndex], color, Math.random, difficulty); world.load(tracks[selectedIndex], race);
     race.start();
     document.body.classList.add('racing');
@@ -132,15 +136,16 @@
     dom['game-canvas'].focus({ preventScroll: true }); world.resize(); updateHud();
   }
   function returnMenu() {
-    keys.clear(); KartGamepad.resetEdges(); preview = true; accumulator = 0; finishAudioUntil = 0; audio.silence();
+    cancelDiscard(); keys.clear(); KartGamepad.resetEdges(); preview = true; accumulator = 0; finishAudioUntil = 0; audio.silence();
     document.body.classList.remove('racing');
     ['race-hud', 'pause-overlay', 'results-overlay', 'countdown', 'toast', 'wrong-way'].forEach(id => dom[id].hidden = true);
     dom['boost-vignette'].classList.remove('active');
     selectTrack(selectedIndex); world.resize(); dom['start-button'].focus({ preventScroll: true });
   }
   function pauseRace() {
+    cancelDiscard(); finishAudioUntil = 0; audio.silence();
     if (!race || preview || !['racing', 'countdown'].includes(race.state)) return;
-    race.pause(); keys.clear(); accumulator = 0; audio.silence();
+    race.pause(); keys.clear(); accumulator = 0;
     dom['pause-overlay'].hidden = false; dom.countdown.hidden = true; $('resume-button').focus({ preventScroll: true });
   }
   function resumeRace() {
@@ -150,6 +155,7 @@
     dom['game-canvas'].focus({ preventScroll: true });
   }
   function showResults() {
+    cancelDiscard();
     if (resultShown) return;
     resultShown = true; keys.clear(); const p = race.player, track = tracks[selectedIndex];
     const newRecord = !records[recordKey(track.id)] || p.finishTime < records[recordKey(track.id)];
@@ -191,6 +197,7 @@
       slot.classList.toggle('filled', Boolean(item));
       if (icon.textContent !== text) icon.textContent = text;
       slot.title = item ? ITEM_LABELS[item] : '空';
+      slot.setAttribute('aria-label', `${i === 0 ? '当前道具' : '备用道具'}：${item ? ITEM_LABELS[item] : '空'}`);
     });
     dom['charge-bar'].style.width = `${p.nitro === 2 ? 100 : p.charge}%`;
     dom['charge-label'].textContent = p.nitro === 2 ? (usingPad() ? '氮气已满 · 按 B 释放' : '氮气已满 · 空格释放') : p.drift ? `漂移集气 ${Math.floor(p.charge)}%` : (usingPad() ? '按住 A/LB 转向 · 漂移集气' : '按住 Shift 转弯 · 漂移集气');
@@ -225,10 +232,10 @@
   }
   function handleEvents() {
     for (const event of race.drainEvents()) {
-      if (event.type === 'itemHit' && world) world.hitBurst(race.cars[event.id]);
+      if (world) world.handleRaceEvent(event, race);
       if (event.type === 'missileLaunch' && event.target === 0) toast('⚠ 有导弹锁定你，快开护盾！', 2400);
       if (event.id !== undefined && event.id !== 0) continue;
-      audio.event(event.type === 'itemUse' ? 'item-' + event.item : event.type);
+      audio.event(event.type === 'itemUse' ? 'item-' + event.item : event.type, event.item);
       if (event.type === 'go') { dom.countdown.querySelector('strong').textContent = 'GO!'; dom.countdown.querySelector('span').textContent = 'MAKE IT A GOOD RIDE'; dom.countdown.querySelector('p').textContent = '向着下一阵风出发'; goUntil = performance.now() + 900; }
       if (event.type === 'charged') { world.driftBurst(); driftReadyUntil = race.elapsed + 0.85; toast(usingPad() ? '✦ 氮气就绪！按 B，全速出发' : '✦ 氮气就绪！按空格，全速出发'); }
       if (event.type === 'boost') toast('N₂O  氮气加速！', 950);
@@ -263,8 +270,10 @@
     if (padState.pressed.has('pause')) togglePauseOrCloseGuide();
     if (preview || activeModal() || !race) return;
     if (padState.pressed.has('nitro')) tryNitro();
+    if (padState.pressed.has('discard')) beginDiscard('gamepad');
     if (padState.pressed.has('item')) tryItem();
-    if (padState.pressed.has('reset')) race.resetCar();
+    if (padState.pressed.has('swap')) trySwapItems();
+    if (padState.pressed.has('reset')) { cancelDiscard(); race.resetCar(); }
   }
   function frame(now) {
     const dt = Math.min(0.1, previousFrame ? (now - previousFrame) / 1000 : 1 / 60); previousFrame = now;
@@ -274,16 +283,17 @@
       if (!preview) {
         if (race.state === 'racing' || race.state === 'countdown') {
           accumulator += dt;
-          while (accumulator >= 1 / 60) { race.step(1 / 60, input(padState)); accumulator -= 1 / 60; }
+          while (accumulator >= 1 / 60) { world.capturePreviousTransforms(race); race.step(1 / 60, input(padState)); accumulator -= 1 / 60; }
           handleEvents();
         } else accumulator = 0;
+        updateDiscard(now, padState);
         hudTimer += dt;
         if (hudTimer >= 0.07) { hudTimer = 0; updateHud(); }
         if (goUntil && now > goUntil) { dom.countdown.hidden = true; goUntil = 0; }
         if (toastUntil && now > toastUntil) { dom.toast.hidden = true; toastUntil = 0; }
       }
-      audio.update(race.player, !preview && (race.state === 'racing' || race.state === 'countdown' || now < finishAudioUntil));
-      if (!document.hidden) world.update(race, dt, preview);
+      audio.update(race.player, !document.hidden && !preview && (race.state === 'racing' || race.state === 'countdown' || now < finishAudioUntil));
+      if (!document.hidden) world.update(race, dt, preview, race.state === 'racing' ? accumulator * 60 : 1);
     }
     requestAnimationFrame(frame);
   }
@@ -314,7 +324,48 @@
     else pauseRace();
   }
   function tryNitro() { if (!race.useNitro() && race.state === 'racing') toast(race.player.boost > 0 ? '正在加速，稍等一下' : usingPad() ? '先按住 A/LB 转向漂移，集满氮气' : '先按住 Shift 转向漂移，集满氮气', 1800); }
-  function tryItem() { if (!race.useItem() && race.state === 'racing') toast('道具栏是空的，去撞赛道上的问号箱', 1800); }
+  function canManageItems() { return race && !preview && race.state === 'racing' && race.player.finishTime === null && !document.hidden && !activeModal(); }
+  function tryItem() {
+    cancelDiscard();
+    if (!canManageItems()) return;
+    const result = {};
+    if (!race.useItem(race.player, result)) {
+      const messages = { empty: '道具栏是空的，去撞赛道上的问号箱', 'magnet-no-target': '前方暂无可吸附目标',
+        'nitro-full': usingPad() ? '氮气已满，先按 B 释放' : '氮气已满，先按空格释放', 'ufo-leading': '你已领先，飞碟暂无可攻击目标', 'no-target': '暂无可攻击的对手' };
+      toast(messages[result.reason] || '当前暂时无法使用道具', 1800);
+    }
+    updateHud();
+  }
+  function trySwapItems() {
+    cancelDiscard();
+    if (!canManageItems()) return;
+    if (race.swapItems()) { updateHud(); toast('已切换道具', 1200); }
+    else toast('需要两个道具才能切换', 1500);
+  }
+  function cancelDiscard() {
+    if (!discardHold) return;
+    discardHold = null; discardProgress.hidden = true;
+    discardFill.style.transform = 'scaleX(0)'; discardProgress.setAttribute('aria-valuenow', '0');
+    dom['item-1'].classList.remove('discarding');
+  }
+  function beginDiscard(source = 'keyboard') {
+    if (!canManageItems()) return;
+    const item = race.player.items[0];
+    if (!item) { toast('道具栏是空的，没有可丢弃的道具', 1500); return; }
+    discardHold = { source, item, startedAt: performance.now() };
+    discardProgress.hidden = false; dom['item-1'].classList.add('discarding');
+  }
+  function updateDiscard(now, padState) {
+    if (!discardHold) return;
+    const held = discardHold.source === 'gamepad' ? usingPad() && padState?.discard : !usingPad() && keys.has('KeyQ');
+    if (!canManageItems() || !held || race.player.items[0] !== discardHold.item) { cancelDiscard(); return; }
+    const progress = Math.min(1, Math.max(0, (now - discardHold.startedAt) / 600));
+    discardFill.style.transform = `scaleX(${progress})`; discardProgress.setAttribute('aria-valuenow', String(Math.floor(progress * 100)));
+    if (progress >= 1) {
+      cancelDiscard(); const item = race.discardItem();
+      if (item) { updateHud(); toast(`已丢弃${ITEM_LABELS[item]}`, 1400); }
+    }
+  }
   document.addEventListener('keydown', event => {
     // Keep keyboard focus inside the topmost modal, including Shift+Tab.
     const modal = activeModal();
@@ -337,9 +388,11 @@
     if (usingPad()) return;
     if (!event.repeat && event.code === 'Space') tryNitro();
     if (!event.repeat && (event.code === 'ControlLeft' || event.code === 'ControlRight')) tryItem();
-    if (!event.repeat && event.code === 'KeyR') race.resetCar();
+    if (!event.repeat && event.code === 'KeyC') trySwapItems();
+    if (!event.repeat && event.code === 'KeyQ') beginDiscard();
+    if (!event.repeat && event.code === 'KeyR') { cancelDiscard(); race.resetCar(); }
   });
-  document.addEventListener('keyup', event => { keys.delete(event.code); if (!preview && gameKeys.has(event.code)) event.preventDefault(); });
+  document.addEventListener('keyup', event => { keys.delete(event.code); if (!usingPad() && event.code === 'KeyQ') cancelDiscard(); if (!preview && gameKeys.has(event.code)) event.preventDefault(); });
   window.addEventListener('blur', () => { keys.clear(); pauseRace(); audio.silence(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { keys.clear(); pauseRace(); audio.silence(); } });
   dom['game-canvas'].addEventListener('webglcontextlost', event => { event.preventDefault(); pauseRace(); showError('显卡连接暂时中断，请重新加载页面恢复比赛。'); });

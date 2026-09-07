@@ -1,9 +1,9 @@
 (function (root) {
   'use strict';
   class KartAudio {
-    constructor(enabled = true) { this.enabled = enabled; this.context = null; this.available = true; }
+    constructor(enabled = true) { this.enabled = enabled; this.context = null; this.available = true; this.voices = new Set(); this.destroyed = false; this.previousStatus = {}; }
     async unlock() {
-      if (!this.enabled || !this.available) return;
+      if (!this.enabled || !this.available || this.destroyed) return;
       try {
         if (!this.context) {
           const AudioContext = root.AudioContext || root.webkitAudioContext;
@@ -11,6 +11,9 @@
           this.context = new AudioContext();
           const ctx = this.context;
           this.master = ctx.createGain(); this.master.gain.value = 0; this.master.connect(ctx.destination);
+          this.statusTone = ctx.createOscillator(); this.statusTone.type = 'sine';
+          this.statusGain = ctx.createGain(); this.statusGain.gain.value = 0;
+          this.statusTone.connect(this.statusGain); this.statusGain.connect(this.master); this.statusTone.start();
           this.engine = ctx.createOscillator(); this.engine.type = 'sawtooth'; this.engine.frequency.value = 55;
           this.engineGain = ctx.createGain(); this.engineGain.gain.value = 0;
           const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 350; filter.Q.value = 0.5;
@@ -26,10 +29,32 @@
       } catch { this.available = false; }
     }
     setEnabled(enabled) { this.enabled = enabled; if (enabled) void this.unlock(); else this.silence(); }
-    silence() { if (this.context && this.master) this.master.gain.setTargetAtTime(0, this.context.currentTime, 0.025); }
+    silence() {
+      this.previousStatus = {};
+      if (this.context && this.statusGain) { this.statusGain.gain.cancelScheduledValues(this.context.currentTime); this.statusGain.gain.setValueAtTime(0, this.context.currentTime); }
+      if (this.context && this.master) { this.master.gain.cancelScheduledValues(this.context.currentTime); this.master.gain.setValueAtTime(0, this.context.currentTime); }
+      for (const voice of this.voices) { try { voice.stop(); } catch {} }
+      this.voices.clear();
+    }
+    destroy() {
+      this.destroyed = true; this.enabled = false; this.silence();
+      for (const source of [this.engine, this.noise, this.statusTone]) { try { source?.stop(); source?.disconnect(); } catch {} }
+      if (this.context) { void this.context.close().catch(() => {}); this.context = null; }
+    }
     update(car, active) {
       if (!this.context || !this.master || this.context.state !== 'running') return;
       const now = this.context.currentTime, on = active && this.enabled;
+      if (!on) { this.silence(); return; }
+      for (const field of ['bubble', 'zap', 'ufo', 'magnet']) {
+        if (this.previousStatus[field] > 0 && !(car[field] > 0)) this.event('release', field);
+        this.previousStatus[field] = car[field] || 0;
+      }
+      const status = this.raceFinished ? '' : car.zap > 0 ? 'zap' : car.bubble > 0 ? 'bubble' : car.ufo > 0 ? 'ufo' : car.magnet > 0 ? 'magnet' : '';
+      if (this.statusTone) {
+        const pitch = { zap: 105, bubble: 330, ufo: 185, magnet: 245 }[status] || 180;
+        this.statusTone.frequency.setTargetAtTime(pitch + (status === 'ufo' ? Math.sin(now * 5) * 22 : status === 'bubble' ? Math.sin(now * 3) * 12 : 0), now, 0.07);
+        this.statusGain.gain.setTargetAtTime(status ? 0.055 : 0, now, 0.04);
+      }
       this.master.gain.setTargetAtTime(on ? 0.2 : 0, now, 0.08);
       this.engine.frequency.setTargetAtTime(48 + Math.abs(car.speed) * 2.5 + (car.boost > 0 ? 20 : 0), now, 0.09);
       this.engineGain.gain.setTargetAtTime(on ? 0.12 + Math.abs(car.speed) / 800 : 0, now, 0.09);
@@ -37,14 +62,18 @@
       this.noiseFilter.frequency.setTargetAtTime(car.drift ? 1500 + car.charge * 6 : car.boost > 0 ? 650 : 400, now, 0.1);
     }
     tone(frequency = 660, duration = 0.16, delay = 0, type = 'sine') {
-      if (!this.enabled || !this.context || !this.master || this.context.state !== 'running') return;
+      if (this.destroyed || !this.enabled || !this.context || !this.master || this.context.state !== 'running' || this.voices.size >= 32) return;
       const ctx = this.context, start = ctx.currentTime + delay, oscillator = ctx.createOscillator(), gain = ctx.createGain();
       oscillator.type = type; oscillator.frequency.value = frequency;
       gain.gain.setValueAtTime(0, start); gain.gain.linearRampToValueAtTime(0.23, start + 0.009); gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
       oscillator.connect(gain); gain.connect(this.master); oscillator.start(start); oscillator.stop(start + duration + 0.02);
-      oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+      this.voices.add(oscillator);
+      oscillator.onended = () => { this.voices.delete(oscillator); oscillator.disconnect(); gain.disconnect(); };
     }
-    event(type) {
+    event(type, item) {
+      if (type === 'finish') this.raceFinished = true;
+      if (type === 'count' || type === 'go') this.raceFinished = false;
+      if (type === 'reset') { this.silence(); return; }
       if (type === 'count') this.tone(520, 0.13);
       if (type === 'go') this.tone(1040, 0.4);
       if (type === 'charged') { this.tone(780, 0.13); this.tone(1170, 0.25, 0.1); }
@@ -59,7 +88,18 @@
       if (type === 'item-nitro') { this.tone(780, 0.13); this.tone(1170, 0.25, 0.1); }
       if (type === 'item-lightning') { this.tone(1400, 0.07, 0, 'square'); this.tone(180, 0.35, 0.05, 'sawtooth'); }
       if (type === 'item-ufo') { this.tone(320, 0.35); this.tone(480, 0.3, 0.18); }
-      if (type === 'itemHit') { this.tone(180, 0.25, 0, 'triangle'); this.tone(90, 0.3, 0.08, 'triangle'); }
+      if (type === 'itemHit') {
+        if (item === 'lightning') { this.tone(1450, 0.045, 0, 'sawtooth'); this.tone(110, 0.23, 0.025, 'square'); this.tone(270, 0.09, 0.14, 'sawtooth'); }
+        else if (item === 'water') { this.tone(880, 0.07); this.tone(420, 0.14, 0.04); this.tone(240, 0.2, 0.12); }
+        else if (item === 'ufo') { this.tone(620, 0.13); this.tone(390, 0.16, 0.08); this.tone(190, 0.26, 0.18); }
+        else if (item === 'banana') { this.tone(760, 0.07, 0, 'triangle'); this.tone(560, 0.1, 0.06, 'triangle'); this.tone(290, 0.14, 0.14, 'triangle'); }
+        else { this.tone(180, 0.25, 0, 'triangle'); this.tone(90, 0.3, 0.08, 'triangle'); }
+      }
+      if (type === 'release') {
+        if (item === 'bubble') { this.tone(1100, 0.045); this.tone(580, 0.07, 0.035); }
+        else if (item === 'ufo') { this.tone(460, 0.12); this.tone(920, 0.14, 0.08); }
+        else this.tone(620, 0.06, 0, 'triangle');
+      }
       if (type === 'finish') [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.36, i * 0.12));
     }
   }
