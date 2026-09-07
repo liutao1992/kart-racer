@@ -43,3 +43,15 @@ body.racing{overflow:hidden}.racing .site-header{height:72px;max-width:none;padd
 .setup .primary-button{min-height:42px}
 .best-time{margin-top:7px}
 }
+
+/* Inventory management keeps the independent page and both control modes. */
+.item-panel{width:176px}
+.item-slots{justify-content:center}
+.item-actions{display:flex;justify-content:space-between;gap:6px;margin-top:22px;font-size:10px;color:#f5f7e9}
+.item-actions kbd{font-size:9px;padding:2px 4px;min-width:17px}
+.item-slot{position:relative}
+.item-slot::after{position:absolute;bottom:-14px;font-size:9px;line-height:12px;white-space:nowrap;color:#d5e8df;content:"备用"}
+.item-slot:first-child::after{content:"当前"}
+.item-slot.discarding{border-color:#ffcf80;box-shadow:0 0 12px #ffb65a55}
+.item-discard-progress{height:4px;margin-top:8px;border-radius:4px;background:#ffffff25;overflow:hidden}
+.item-discard-progress i{display:block;height:100%;background:#ffcf80;transform:scaleX(0);transform-origin:left}

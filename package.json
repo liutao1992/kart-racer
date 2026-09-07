@@ -7,9 +7,9 @@
     "dev": "node scripts/serve.cjs",
     "start": "node scripts/serve.cjs",
     "vendor": "node scripts/vendor.cjs",
-    "check": "node --check js/tracks.js && node --check js/core.js && node --check js/world.js && node --check js/audio.js && node --check js/gamepad.js && node --check js/game.js",
+    "check": "node --check js/tracks.js && node --check js/core.js && node --check js/kart-model.js && node --check js/item-effects.js && node --check js/world.js && node --check js/audio.js && node --check js/gamepad.js && node --check js/game.js",
     "check:tracks": "node scripts/validate-tracks.cjs",
-    "test": "node --test tests/core.test.cjs",
+    "test": "node --test tests/core.test.cjs tests/inventory.test.cjs tests/physics-replay.test.cjs tests/audio.test.cjs",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

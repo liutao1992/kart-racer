@@ -49,7 +49,11 @@ test('file URL works offline, settings persist and blocked storage is tolerated'
 });
 
 test('keyboard driving, pause, reset, focus loss and replay', async ({ page }, info) => {
-  await loaded(page); await page.clock.install();
+  await loaded(page);
+  // Advance simulation only through explicit steps. Slow machines must not drive
+  // past the starting straight while the test process awaits browser responses.
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'));
   await page.locator('#start-button').click();
   expect((await snapshot(page)).state).toBe('countdown');
   await page.keyboard.down('ArrowUp');

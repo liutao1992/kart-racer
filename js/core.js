@@ -104,6 +104,7 @@
       this.state = 'ready'; this.elapsed = 0; this.countdown = 3.4; this.laps = 3;
       this.events = []; this.finishedCount = 0; this.rand = rng;
       this.boxes = buildBoxes(track); this.hazards = []; this.missiles = [];
+      this.nextVisualId = 1; // Presentation identity only; never consumes simulation randomness.
       this.cars = Array.from({ length: 6 }, (_, id) => {
         const progress = -8 - Math.floor(id / 2) * 7;
         const pos = sample(track, progress, id % 2 ? 2.1 : -2.1);
@@ -134,30 +135,44 @@
       for (const item of ITEMS) { roll -= row.weights[item]; if (roll < 0) return item; }
       return 'banana';
     }
-    useItem(car = this.player) {
-      if (this.state !== 'racing' || car.finishTime !== null || !car.items.length) return false;
-      const item = car.items.shift(), refund = () => { car.items.unshift(item); return false; };
+    swapItems(car = this.player) {
+      if (this.state !== 'racing' || car.finishTime !== null || car.items.length < 2) return false;
+      [car.items[0], car.items[1]] = [car.items[1], car.items[0]];
+      return true;
+    }
+    discardItem(car = this.player) {
+      if (this.state !== 'racing' || car.finishTime !== null || !car.items.length) return null;
+      return car.items.shift();
+    }
+    useItem(car = this.player, result = null) {
+      if (result) result.reason = null;
+      const fail = reason => { if (result) result.reason = reason; return false; };
+      if (this.state !== 'racing') return fail('not-racing');
+      if (car.finishTime !== null) return fail('finished');
+      if (!car.items.length) return fail('empty');
+      const item = car.items.shift(), refund = reason => { car.items.unshift(item); return fail(reason); };
       if (item === 'nitro') {
-        if (car.nitro >= 2) return refund();
+        if (car.nitro >= 2) return refund('nitro-full');
         car.nitro++;
       } else if (item === 'shield') {
         car.shield = 6;
       } else if (item === 'banana') {
-        this.hazards.push({ kind: 'banana', x: car.x, z: car.z, arm: 0.5, life: 40, from: car.id });
+        this.hazards.push({ visualId: this.nextVisualId++, kind: 'banana', x: car.x, z: car.z, arm: 0.5, life: 40, from: car.id });
       } else if (item === 'water') {
         const p = sample(this.track, car.progress + 45, car.lateral);
-        this.hazards.push({ kind: 'water', x: p.x, z: p.z, arm: 0.8, blast: 0, from: car.id });
+        this.hazards.push({ visualId: this.nextVisualId++, originX: car.x, originZ: car.z, kind: 'water', x: p.x, z: p.z, arm: 0.8, blast: 0, from: car.id });
       } else if (item === 'magnet') {
         const target = this.cars.filter(c => c !== car && c.finishTime === null && c.progress > car.progress && c.progress - car.progress < 130).sort((a, b) => a.progress - b.progress)[0];
-        if (!target) return refund();
+        if (!target) return refund('magnet-no-target');
         car.magnet = 2.4; car.magnetTarget = target.id;
       } else if (item === 'lightning') {
         const targets = this.cars.filter(c => c !== car && c.finishTime === null);
-        if (!targets.length) return refund();
+        if (!targets.length) return refund('no-target');
         for (const target of targets) this.applyHit(target, 'lightning', car.id);
       } else if (item === 'ufo') {
         const target = this.standings().find(c => c.finishTime === null);
-        if (!target || target === car) return refund();
+        if (!target) return refund('no-target');
+        if (target === car) return refund('ufo-leading');
         this.applyHit(target, 'ufo', car.id);
       } else if (item === 'missile') {
         const order = this.standings(), rank = order.indexOf(car);
@@ -165,7 +180,7 @@
         // Legend AI jump the queue: any in-range player takes priority over rank order.
         const pd = this.player.finishTime === null ? this.player.progress - car.progress : Infinity;
         if (this.difficulty.huntPlayer && pd > 0 && pd < 110) target = this.player;
-        this.missiles.push({ from: car.id, target: target ? target.id : -1, progress: car.progress, lateral: car.lateral, life: 4 });
+        this.missiles.push({ visualId: this.nextVisualId++, originX: car.x, originZ: car.z, from: car.id, target: target ? target.id : -1, progress: car.progress, lateral: car.lateral, life: 4 });
         this.events.push({ type: 'missileLaunch', id: car.id, target: target ? target.id : -1 });
       }
       this.events.push({ type: 'itemUse', id: car.id, item });
@@ -175,7 +190,7 @@
     applyHit(car, kind, fromId = -1) {
       if (car.finishTime !== null) return false;
       if (kind !== 'banana' && car.shield > 0) {
-        car.shield = 0; this.events.push({ type: 'itemBlock', id: car.id, item: kind });
+        car.shield = 0; this.events.push({ type: 'itemBlock', id: car.id, item: kind, sourceId: fromId });
         return false;
       }
       if (kind === 'missile') { car.stun = 1.1; car.speed *= 0.35; }

@@ -1,9 +1,10 @@
 (function (root) {
   'use strict';
+  // RB [5] swaps inventory; D-pad down [13] holds discard. Existing mappings stay unchanged.
   // W3C standard mapping: axes[0] left stick X, buttons[7] RT, buttons[6] LT,
   // buttons[0] A, [1] B, [2] X, [3] Y, [4] LB, [9] Start.
   const STEER_DEADZONE = 0.12, THROTTLE_DEADZONE = 0.05, BRAKE_THRESHOLD = 0.3;
-  const EDGE_ACTIONS = { 1: 'nitro', 2: 'item', 3: 'reset', 9: 'pause' };
+  const EDGE_ACTIONS = { 1: 'nitro', 2: 'item', 3: 'reset', 5: 'swap', 9: 'pause', 13: 'discard' };
   let padIndex = null, enabled = false, prevButtons = [];
   const connectCallbacks = [], disconnectCallbacks = [];
   function pads() {
@@ -60,6 +61,7 @@
         throttle,
         brake: Boolean(pad.buttons[6] && (pad.buttons[6].pressed || pad.buttons[6].value > BRAKE_THRESHOLD)),
         drift: Boolean((pad.buttons[0] && pad.buttons[0].pressed) || (pad.buttons[4] && pad.buttons[4].pressed)),
+        discard: Boolean(pad.buttons[13] && pad.buttons[13].pressed),
         pressed
       };
     }
